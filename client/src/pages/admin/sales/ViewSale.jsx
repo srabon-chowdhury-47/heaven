@@ -23,7 +23,7 @@ const COMPANY = {
   addressLine2: "Address Line 2,",
   addressLine3: "City, Bangladesh",
   phone: "Tel 0421-66095, Mob 01924-331354, 01711-355328, 01778-117515",
-  email: "Email: heavenautos77jsr@yahoo.com/heavenautojessore@gmail.com",
+  email: "Email: heavenautojessore@gmail.com Website: www.heavenautos.com.bd",
 };
 
 // ── Convert amount to words (BDT, lakh/crore system) ──
@@ -187,6 +187,13 @@ export default function ViewSale() {
     return { subtotal, discount, total };
   };
 
+  // Calculate percentage difference
+  const calculatePercentage = (mrp, price) => {
+    if (!mrp || mrp === 0) return null;
+    const diff = ((mrp - price) / mrp) * 100;
+    return diff.toFixed(1);
+  };
+
   // Print bill — layout styled like a standard computer shop invoice
   const handlePrint = async () => {
     setPrinting(true);
@@ -208,6 +215,8 @@ export default function ViewSale() {
           ? totals.total
           : parseFloat(sale?.paid_amount || 0);
       const due = totals.total - paid;
+      const previousBalance = parseFloat(sale?.previous_balance || 0);
+      const currentBalance = previousBalance + due;
 
       WinPrint.document.write(`
         <html>
@@ -280,14 +289,21 @@ export default function ViewSale() {
                 margin-bottom: 3px;
                 width: 100%;
               }
-              /* ── Customer line ── */
-              .customer-line {
-                font-size: 12px;
+              /* ── Customer Info Table ── */
+              table.customer-info {
+                width: 100%;
+                border-collapse: collapse;
                 margin-bottom: 12px;
-                line-height: 1.5;
+                border: 1px solid #000;
               }
-              .customer-line b {
+              table.customer-info td {
+                border: 1px solid #000;
+                padding: 4px 8px;
+                font-size: 12px;
+              }
+              table.customer-info .label {
                 font-weight: bold;
+                width: 15%;
               }
               /* ── Items table (fully bordered, B&W) ── */
               table.items {
@@ -304,17 +320,20 @@ export default function ViewSale() {
               }
               table.items th {
                 font-weight: bold;
-                text-align: left;
+                text-align: center;
                 background: #f0f0f0;
               }
               .col-sl { width: 5%; text-align: center; }
-              .col-part-no { width: 15%; }
-              .col-part-name { width: 35%; }
-              .col-qty { width: 10%; text-align: center; }
-              .col-price { width: 17%; text-align: right; }
-              .col-total { width: 18%; text-align: right; }
+              .col-part-no { width: 13%; text-align: center; }
+              .col-part-name { width: 27%; text-align: center; }
+              .col-qty { width: 7%; text-align: center; }
+              .col-mrp { width: 10%; text-align: center; }
+              .col-percent { width: 8%; text-align: center; }
+              .col-price { width: 12%; text-align: center; }
+              .col-total { width: 15%; text-align: center; }
               td.num { text-align: right; }
               td.ctr { text-align: center; }
+              td.part-no { text-align: left; }
               .item-name { font-weight: normal; }
               .item-meta { font-size: 10px; color: #555; }
               /* Totals rows inside the table */
@@ -327,13 +346,18 @@ export default function ViewSale() {
                 border: 1px solid #000;
                 font-size: 11px;
               }
-              /* ── Paid/Due line ── */
-              .paid-line {
+              /* ── Balance rows inside table ── */
+              .balance-label {
                 text-align: right;
-                font-size: 13px;
-                margin: 8px 0 4px;
-                font-weight: bold;
+                font-weight: normal;
+                font-size: 12px;
               }
+              .balance-value {
+                text-align: right;
+                font-weight: bold;
+                font-size: 12px;
+              }
+              /* ── Received note ── */
               .received-note {
                 font-size: 12px;
                 margin: 10px 0 18px;
@@ -418,15 +442,25 @@ export default function ViewSale() {
                 </div>
               </div>
 
-              <!-- ── Customer line ── -->
-              <div class="customer-line">
-                <b>Customer:</b> ${getCustomerName(sale?.customer)}
-                ${customer?.proprietor_name ? ` &nbsp; <b>Proprietor:</b> ${customer.proprietor_name}` : ""}
-                ${customer?.phone ? ` &nbsp; <b>Phone:</b> ${customer.phone}` : ""}
-                <br/>
-                ${customer?.address ? `<b>Address:</b> ${customer.address} &nbsp; ` : ""}
-                <b>Salesman:</b> ${getEmployeeName(sale?.sold_by)}
-              </div>
+              <!-- ── Customer Info Table ── -->
+              <table class="customer-info">
+                <tr>
+                  <td class="label">Customer:</td>
+                  <td>${getCustomerName(sale?.customer)}</td>
+                  <td class="label">Phone:</td>
+                  <td>${customer?.phone || "N/A"}</td>
+                </tr>
+                <tr>
+                  <td class="label">Address:</td>
+                  <td colspan="3">${customer?.address || "N/A"}</td>
+                </tr>
+                <tr>
+                  <td class="label">Salesman:</td>
+                  <td>${getEmployeeName(sale?.sold_by)}</td>
+                  <td class="label">Date:</td>
+                  <td>${formatDateShort(sale?.sale_date)}</td>
+                </tr>
+              </table>
 
               <!-- ── Items table ── -->
               <table class="items">
@@ -436,49 +470,73 @@ export default function ViewSale() {
                     <th class="col-part-no">PART NO.</th>
                     <th class="col-part-name">PART NAME</th>
                     <th class="col-qty">QTY</th>
+                    <th class="col-mrp">MRP (INR)</th>
+                    <th class="col-percent">%</th>
                     <th class="col-price">PRICE</th>
                     <th class="col-total">TOTAL</th>
                   </tr>
                 </thead>
                 <tbody>
-                  ${sale?.items?.map((item, index) => `
+                  ${sale?.items?.map((item, index) => {
+                    const mrp = parseFloat(item.mrp_inr || 0);
+                    const price = parseFloat(item.unit_price_bdt || 0);
+                    const percentage = calculatePercentage(mrp, price);
+                    return `
                   <tr>
                     <td class="ctr">${index + 1}</td>
-                    <td style="font-size:11px;">${getProductPartNumber(item)}</td>
+                    <td class="part-no" style="font-size:11px;">${getProductPartNumber(item)}</td>
                     <td>
                       <span class="item-name">${item.product_name}</span>
                       <div class="item-meta">Brand: ${getProductBrand(item)}</div>
                     </td>
                     <td class="ctr">${item.quantity}</td>
-                    <td class="num">${formatNumber(item.unit_price_bdt)}</td>
+                    <td class="num">${mrp ? formatNumber(mrp) : "—"}</td>
+                    <td class="ctr">${percentage ? percentage + "%" : "—"}</td>
+                    <td class="num">${formatNumber(price)}</td>
                     <td class="num">${formatNumber(item.total_price_bdt)}</td>
                   </tr>
-                  `).join("") || '<tr><td colspan="6" style="text-align:center;">No items found</td></tr>'}
-                  <!-- Totals rows -->
+                  `;
+                  }).join("") || '<tr><td colspan="8" style="text-align:center;">No items found</td></tr>'}
+                  <!-- Totals and Balance rows -->
                   <tr>
-                    <td colspan="4" rowspan="${totals.discount > 0 ? 3 : 2}" class="words-cell" style="vertical-align:bottom; padding: 8px;">
+                    <td colspan="4" rowspan="${totals.discount > 0 ? 6 : 5}" class="words-cell" style="vertical-align:bottom; padding: 8px;">
                       <b>Amount In Words:</b> BDT ${numberToWords(totals.total)} Only
                     </td>
-                    <td class="totals-label"><b>Total</b></td>
-                    <td class="num"><b>${formatNumber(totals.subtotal)}</b></td>
+                    <td colspan="2" class="totals-label"><b>Total</b></td>
+                    <td class="num" colspan="2"><b>${formatNumber(totals.subtotal)}</b></td>
                   </tr>
                   ${totals.discount > 0 ? `
                   <tr>
-                    <td class="totals-label">Less/Add.</td>
-                    <td class="num">${formatNumber(totals.discount)}</td>
+                    <td colspan="2" class="totals-label">Less/Add.</td>
+                    <td class="num" colspan="2">${formatNumber(totals.discount)}</td>
                   </tr>
                   ` : ""}
                   <tr>
-                    <td class="totals-label"><b>Grand Total</b></td>
-                    <td class="num"><b>${formatNumber(totals.total)}</b></td>
+                    <td colspan="2" class="totals-label"><b>Grand Total</b></td>
+                    <td class="num" colspan="2"><b>${formatNumber(totals.total)}</b></td>
+                  </tr>
+                  <tr>
+                    <td colspan="2" class="balance-label">Previous Balance</td>
+                    <td class="num balance-value" colspan="2">${formatNumber(previousBalance)}</td>
+                  </tr>
+                  <tr>
+                    <td colspan="2" class="balance-label">Paid</td>
+                    <td class="num balance-value" colspan="2">${formatNumber(paid)}</td>
+                  </tr>
+                  <tr>
+                    <td colspan="2" class="balance-label">Due</td>
+                    <td class="num balance-value" colspan="2">${formatNumber(due > 0 ? due : 0)}</td>
+                  </tr>
+                  <tr>
+                    <td colspan="2" class="balance-label"><b>Current Balance</b></td>
+                    <td class="num balance-value" colspan="2" style="color: ${currentBalance > 0 ? '#cc0000' : '#006600'};">
+                      <b>${formatNumber(currentBalance)}</b>
+                    </td>
                   </tr>
                 </tbody>
               </table>
 
-              <!-- ── Paid / Due ── -->
-              <div class="paid-line">
-                Paid: ${formatNumber(paid)} Tk &nbsp;&nbsp;&nbsp; Due: ${formatNumber(due > 0 ? due : 0)} Tk
-              </div>
+              <!-- ── Received note ── -->
               <div class="received-note">✓ Good received by customer in good condition.</div>
 
               <!-- ── Sale info ── -->
@@ -568,6 +626,11 @@ export default function ViewSale() {
   }
 
   const totals = calculateTotals();
+  const customer = getCustomerDetails(sale.customer);
+  const previousBalance = parseFloat(sale?.previous_balance || 0);
+  const paid = sale?.payment_status === "Paid" ? totals.total : parseFloat(sale?.paid_amount || 0);
+  const due = totals.total - paid;
+  const currentBalance = previousBalance + due;
 
   return (
     <div className="max-w-6xl mx-auto p-3">
@@ -599,13 +662,6 @@ export default function ViewSale() {
             <FiPrinter />
             {printing ? "Preparing..." : "Print Bill"}
           </button>
-          {/* <button
-            onClick={() => navigate(`/dashboard/sales/edit/${sale.id}`)}
-            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded font-semibold transition"
-          >
-            <FiFileText />
-            Edit
-          </button> */}
         </div>
       </div>
 
@@ -613,6 +669,37 @@ export default function ViewSale() {
       <div style={{ display: 'none' }}>
         <div ref={printRef}>
           {/* Print content is generated in handlePrint */}
+        </div>
+      </div>
+
+      {/* Customer Info Table */}
+      <div className="bg-white border border-gray-300 overflow-hidden mb-4">
+        <div className="border-b border-gray-300 px-3 py-2 bg-gray-50">
+          <h3 className="text-xs font-bold text-gray-600 uppercase tracking-wider flex items-center gap-2">
+            <FiUser /> Customer Information
+          </h3>
+        </div>
+        <div className="p-3">
+          <table className="w-full text-sm">
+            <tbody>
+              <tr>
+                <td className="font-semibold w-24 py-1">Customer:</td>
+                <td className="py-1">{getCustomerName(sale.customer)}</td>
+                <td className="font-semibold w-24 py-1">Phone:</td>
+                <td className="py-1">{customer?.phone || "N/A"}</td>
+              </tr>
+              <tr>
+                <td className="font-semibold w-24 py-1">Address:</td>
+                <td className="py-1" colSpan="3">{customer?.address || "N/A"}</td>
+              </tr>
+              <tr>
+                <td className="font-semibold w-24 py-1">Salesman:</td>
+                <td className="py-1">{getEmployeeName(sale.sold_by)}</td>
+                <td className="font-semibold w-24 py-1">Date:</td>
+                <td className="py-1">{formatDate(sale.sale_date)}</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
 
@@ -653,7 +740,7 @@ export default function ViewSale() {
       </div>
 
       {/* Status & Payment Info */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 mb-4">
         <div className="bg-white border border-gray-300 p-3 flex items-center gap-3">
           <div className={`p-2 rounded-full ${
             sale.payment_status === 'Paid' ? 'bg-green-100' :
@@ -685,10 +772,18 @@ export default function ViewSale() {
         </div>
         <div className="bg-white border border-gray-300 p-3">
           <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
-            Items Count
+            Previous Balance
           </p>
-          <p className="font-bold text-gray-800">
-            {sale.items?.length || 0} products
+          <p className="font-bold text-amber-600">
+            {formatCurrency(previousBalance)}
+          </p>
+        </div>
+        <div className="bg-white border border-gray-300 p-3">
+          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+            Current Balance
+          </p>
+          <p className={`font-bold ${currentBalance > 0 ? 'text-red-600' : 'text-green-600'}`}>
+            {formatCurrency(currentBalance)}
           </p>
         </div>
       </div>
@@ -710,22 +805,28 @@ export default function ViewSale() {
                 <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
                   SL
                 </th>
-                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-left">
+                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
                   Part No
                 </th>
-                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-left">
+                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
                   Product Name
                 </th>
                 <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
                   Qty
                 </th>
-                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-right">
-                  Unit Price
+                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
+                  MRP (INR)
                 </th>
-                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-right">
+                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
+                  %
+                </th>
+                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
+                  Price
+                </th>
+                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
                   Total
                 </th>
-                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-right text-emerald-300">
+                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center text-emerald-300">
                   Profit
                 </th>
               </tr>
@@ -734,12 +835,15 @@ export default function ViewSale() {
               {sale.items && sale.items.length > 0 ? (
                 sale.items.map((item, idx) => {
                   const partNumber = getProductPartNumber(item);
+                  const mrp = parseFloat(item.mrp_inr || 0);
+                  const price = parseFloat(item.unit_price_bdt || 0);
+                  const percentage = calculatePercentage(mrp, price);
                   return (
                     <tr key={idx} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
                       <td className="border border-gray-300 px-2 py-1.5 text-center text-xs">
                         {idx + 1}
                       </td>
-                      <td className="border border-gray-300 px-2 py-1.5 text-xs">
+                      <td className="border border-gray-300 px-2 py-1.5 text-left text-xs">
                         <div className="font-bold text-gray-800">
                           {partNumber}
                         </div>
@@ -756,6 +860,12 @@ export default function ViewSale() {
                         {item.quantity}
                       </td>
                       <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-xs">
+                        {mrp ? formatCurrency(mrp) : "—"}
+                      </td>
+                      <td className="border border-gray-300 px-2 py-1.5 text-center text-xs font-semibold">
+                        {percentage ? percentage + "%" : "—"}
+                      </td>
+                      <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-xs">
                         {formatCurrency(item.unit_price_bdt)}
                       </td>
                       <td className="border border-gray-300 px-2 py-1.5 text-right font-mono font-bold text-xs text-gray-800">
@@ -769,7 +879,7 @@ export default function ViewSale() {
                 })
               ) : (
                 <tr>
-                  <td colSpan="7" className="border border-gray-300 px-3 py-6 text-center text-gray-400 text-sm">
+                  <td colSpan="9" className="border border-gray-300 px-3 py-6 text-center text-gray-400 text-sm">
                     No products in this sale.
                   </td>
                 </tr>
@@ -777,7 +887,7 @@ export default function ViewSale() {
             </tbody>
             <tfoot>
               <tr className="bg-gray-50 font-bold">
-                <td colSpan="5" className="border border-gray-300 px-2 py-1.5 text-right text-xs uppercase text-gray-600">
+                <td colSpan="7" className="border border-gray-300 px-2 py-1.5 text-right text-xs uppercase text-gray-600">
                   Subtotal
                 </td>
                 <td className="border border-gray-300 px-2 py-1.5 text-right font-mono">
@@ -787,7 +897,7 @@ export default function ViewSale() {
               </tr>
               {totals.discount > 0 && (
                 <tr className="bg-gray-50">
-                  <td colSpan="5" className="border border-gray-300 px-2 py-1.5 text-right text-xs uppercase text-red-600">
+                  <td colSpan="7" className="border border-gray-300 px-2 py-1.5 text-right text-xs uppercase text-red-600">
                     Discount
                   </td>
                   <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-red-600">
@@ -797,11 +907,47 @@ export default function ViewSale() {
                 </tr>
               )}
               <tr className="bg-green-50 font-bold">
-                <td colSpan="5" className="border border-gray-300 px-2 py-1.5 text-right text-sm uppercase text-green-700">
+                <td colSpan="7" className="border border-gray-300 px-2 py-1.5 text-right text-sm uppercase text-green-700">
                   Grand Total
                 </td>
                 <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-base text-green-700">
                   {formatCurrency(totals.total)}
+                </td>
+                <td className="border border-gray-300 px-2 py-1.5"></td>
+              </tr>
+              <tr className="bg-amber-50">
+                <td colSpan="7" className="border border-gray-300 px-2 py-1.5 text-right text-xs text-amber-700">
+                  Previous Balance
+                </td>
+                <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-amber-700">
+                  {formatCurrency(previousBalance)}
+                </td>
+                <td className="border border-gray-300 px-2 py-1.5"></td>
+              </tr>
+              <tr className="bg-blue-50">
+                <td colSpan="7" className="border border-gray-300 px-2 py-1.5 text-right text-xs text-blue-700">
+                  Paid
+                </td>
+                <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-blue-700">
+                  {formatCurrency(paid)}
+                </td>
+                <td className="border border-gray-300 px-2 py-1.5"></td>
+              </tr>
+              <tr className="bg-red-50">
+                <td colSpan="7" className="border border-gray-300 px-2 py-1.5 text-right text-xs text-red-700">
+                  Due
+                </td>
+                <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-red-700">
+                  {formatCurrency(due > 0 ? due : 0)}
+                </td>
+                <td className="border border-gray-300 px-2 py-1.5"></td>
+              </tr>
+              <tr className={`font-bold ${currentBalance > 0 ? 'bg-red-100' : 'bg-green-100'}`}>
+                <td colSpan="7" className={`border border-gray-300 px-2 py-1.5 text-right text-sm uppercase ${currentBalance > 0 ? 'text-red-700' : 'text-green-700'}`}>
+                  Current Balance
+                </td>
+                <td className={`border border-gray-300 px-2 py-1.5 text-right font-mono text-base ${currentBalance > 0 ? 'text-red-700' : 'text-green-700'}`}>
+                  {formatCurrency(currentBalance)}
                 </td>
                 <td className="border border-gray-300 px-2 py-1.5"></td>
               </tr>
