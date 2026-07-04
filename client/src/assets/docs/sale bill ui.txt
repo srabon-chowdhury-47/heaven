@@ -1,0 +1,1033 @@
+// Sale ledger ui 1
+
+import { useState, useEffect, useRef } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import axiosInstance from "../../../api/axios";
+import {
+  FiArrowLeft,
+  FiPrinter,
+  FiFileText,
+  FiUser,
+  FiUserCheck,
+  FiCalendar,
+  FiDollarSign,
+  FiPackage,
+  FiCheckCircle,
+  FiClock,
+  FiXCircle,
+  FiDownload,
+  FiCreditCard,
+  FiMapPin,
+  FiPhone,
+  FiMail,
+  FiTruck,
+} from "react-icons/fi";
+
+export default function ViewSale() {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const printRef = useRef();
+
+  const [sale, setSale] = useState(null);
+  const [products, setProducts] = useState([]);
+  const [customers, setCustomers] = useState([]);
+  const [employees, setEmployees] = useState([]);
+  const [companyInfo, setCompanyInfo] = useState({
+    name: "Your Company Name",
+    address: "123 Business Street, City, Country",
+    phone: "+880 1234-567890",
+    email: "info@yourcompany.com",
+    website: "www.yourcompany.com",
+  });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [printing, setPrinting] = useState(false);
+
+  useEffect(() => {
+    fetchSaleData();
+    fetchCompanyInfo();
+  }, [id]);
+
+  const fetchSaleData = async () => {
+    try {
+      setLoading(true);
+      const [saleRes, prodRes, custRes, empRes] = await Promise.all([
+        axiosInstance.get(`sale/sales/${id}/`),
+        axiosInstance.get("products/"),
+        axiosInstance.get("person/customers/"),
+        axiosInstance.get("person/employees/"),
+      ]);
+
+      setSale(saleRes.data);
+      setProducts(prodRes.data.results || prodRes.data);
+      setCustomers(custRes.data.results || custRes.data);
+      setEmployees(empRes.data.results || empRes.data);
+      setError("");
+    } catch (err) {
+      console.error(err);
+      setError(err.response?.data?.detail || "Failed to fetch sale details.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchCompanyInfo = async () => {
+    try {
+      // Try to fetch company info from API if available
+      const response = await axiosInstance.get("company/info/");
+      if (response.data) {
+        setCompanyInfo(response.data);
+      }
+    } catch (err) {
+      // Use default company info if API not available
+      console.log("Using default company info");
+    }
+  };
+
+  // Helper functions
+  const getCustomerName = (id) => {
+    if (!id) return "Walk-in Customer";
+    const cust = customers.find((c) => String(c.id) === String(id));
+    return cust ? cust.shop_name || cust.proprietor_name || cust.name : "Walk-in Customer";
+  };
+
+  const getCustomerDetails = (id) => {
+    if (!id) return null;
+    return customers.find((c) => String(c.id) === String(id));
+  };
+
+  const getEmployeeName = (id) => {
+    if (!id) return "Unknown";
+    const emp = employees.find((e) => String(e.id) === String(id));
+    if (!emp) return "Unknown";
+    return emp.first_name
+      ? `${emp.first_name} ${emp.last_name || ""}`.trim()
+      : emp.full_name || emp.name || emp.employee_id;
+  };
+
+  const getProductPartNumber = (item) => {
+    if (!item) return "N/A";
+    let product = products.find((p) => String(p.id) === String(item.product));
+    if (!product) {
+      product = products.find((p) => p.product_name === item.product_name);
+    }
+    return product?.part_number || "N/A";
+  };
+
+  const getProductBrand = (item) => {
+    if (!item) return "N/A";
+    const product = products.find((p) => String(p.id) === String(item.product));
+    return product?.brand_name || product?.brand || "N/A";
+  };
+
+  const formatDate = (dateString) => {
+    if (!dateString) return "—";
+    return new Date(dateString).toLocaleDateString("en-BD", {
+      day: "2-digit",
+      month: "long",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const formatDateShort = (dateString) => {
+    if (!dateString) return "—";
+    return new Date(dateString).toLocaleDateString("en-BD", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  };
+
+  const formatCurrency = (amount) => {
+    return `৳ ${parseFloat(amount || 0).toFixed(2)}`;
+  };
+
+  const formatCurrencyWords = (amount) => {
+    const num = parseFloat(amount || 0);
+    if (num === 0) return "Zero Taka Only";
+    
+    const taka = Math.floor(num);
+    const paisa = Math.round((num - taka) * 100);
+    
+    const ones = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
+    const tens = ['', '', 'Twenty', 'Thirty', 'Forty', 'Fifty', 'Sixty', 'Seventy', 'Eighty', 'Ninety'];
+    
+    const convertToWords = (n) => {
+      if (n < 20) return ones[n];
+      if (n < 100) return tens[Math.floor(n / 10)] + (n % 10 ? ' ' + ones[n % 10] : '');
+      if (n < 1000) return ones[Math.floor(n / 100)] + ' Hundred' + (n % 100 ? ' ' + convertToWords(n % 100) : '');
+      if (n < 100000) return convertToWords(Math.floor(n / 1000)) + ' Thousand' + (n % 1000 ? ' ' + convertToWords(n % 1000) : '');
+      if (n < 10000000) return convertToWords(Math.floor(n / 100000)) + ' Lakh' + (n % 100000 ? ' ' + convertToWords(n % 100000) : '');
+      return convertToWords(Math.floor(n / 10000000)) + ' Crore' + (n % 10000000 ? ' ' + convertToWords(n % 10000000) : '');
+    };
+    
+    let result = convertToWords(taka) + ' Taka';
+    if (paisa > 0) {
+      result += ' and ' + convertToWords(paisa) + ' Paisa';
+    }
+    return result + ' Only';
+  };
+
+  // Calculate totals
+  const calculateTotals = () => {
+    if (!sale || !sale.items) return { subtotal: 0, total: 0, discount: 0, tax: 0 };
+    const subtotal = sale.items.reduce((sum, item) => sum + parseFloat(item.total_price_bdt || 0), 0);
+    const discount = parseFloat(sale.discount_amount || 0);
+    const tax = parseFloat(sale.tax_amount || 0);
+    const total = subtotal - discount + tax;
+    return { subtotal, discount, tax, total };
+  };
+
+  // Print bill
+  const handlePrint = async () => {
+    setPrinting(true);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      const WinPrint = window.open('', '', 'width=1000,height=700');
+      
+      if (!WinPrint) {
+        alert("Please allow pop-ups for this site to print the bill.");
+        setPrinting(false);
+        return;
+      }
+
+      const totals = calculateTotals();
+
+      WinPrint.document.write(`
+        <html>
+          <head>
+            <title>Invoice #${sale?.invoice_number || "N/A"}</title>
+            <style>
+              @page {
+                size: A4;
+                margin: 15mm;
+              }
+              * {
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+              }
+              body {
+                font-family: 'Helvetica Neue', Arial, sans-serif;
+                font-size: 11px;
+                color: #1a1a1a;
+                background: #ffffff;
+                line-height: 1.5;
+              }
+              .invoice-wrapper {
+                max-width: 1100px;
+                margin: 0 auto;
+                background: white;
+              }
+              
+              /* Header Section */
+              .header-section {
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                padding-bottom: 15px;
+                border-bottom: 3px solid #1a1a1a;
+                margin-bottom: 20px;
+              }
+              .company-info {
+                flex: 1;
+              }
+              .company-name {
+                font-size: 28px;
+                font-weight: 800;
+                color: #1a1a1a;
+                letter-spacing: 1px;
+                margin-bottom: 2px;
+              }
+              .company-details {
+                font-size: 10px;
+                color: #666;
+                line-height: 1.6;
+              }
+              .company-details i {
+                font-style: normal;
+                margin-right: 5px;
+              }
+              .invoice-title {
+                text-align: right;
+                padding-left: 30px;
+              }
+              .invoice-title h2 {
+                font-size: 32px;
+                font-weight: 800;
+                color: #1a1a1a;
+                letter-spacing: 3px;
+                text-transform: uppercase;
+              }
+              .invoice-number {
+                font-size: 16px;
+                font-weight: 700;
+                color: #2d7d2d;
+                margin-top: 5px;
+                background: #f0f7f0;
+                padding: 4px 15px;
+                display: inline-block;
+                border-radius: 4px;
+              }
+              .invoice-status {
+                margin-top: 8px;
+                display: inline-block;
+              }
+              .badge {
+                padding: 4px 16px;
+                font-size: 11px;
+                font-weight: 700;
+                text-transform: uppercase;
+                border-radius: 20px;
+                letter-spacing: 0.5px;
+              }
+              .badge-paid {
+                background: #28a745;
+                color: white;
+              }
+              .badge-partial {
+                background: #ffc107;
+                color: #1a1a1a;
+              }
+              .badge-unpaid {
+                background: #dc3545;
+                color: white;
+              }
+              
+              /* Info Grid */
+              .info-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 25px;
+                margin-bottom: 20px;
+                padding: 15px 20px;
+                background: #f8f9fa;
+                border-radius: 6px;
+                border: 1px solid #e9ecef;
+              }
+              .info-box h4 {
+                font-size: 10px;
+                text-transform: uppercase;
+                color: #6c757d;
+                letter-spacing: 1px;
+                font-weight: 700;
+                margin-bottom: 6px;
+              }
+              .info-box .value {
+                font-size: 14px;
+                font-weight: 600;
+                color: #1a1a1a;
+              }
+              .info-box .sub-info {
+                font-size: 10px;
+                color: #6c757d;
+                margin-top: 3px;
+              }
+              .info-box .sub-info i {
+                font-style: normal;
+                margin-right: 8px;
+              }
+              
+              /* Products Table */
+              .table-container {
+                margin: 20px 0;
+                border: 1px solid #dee2e6;
+                border-radius: 6px;
+                overflow: hidden;
+              }
+              table {
+                width: 100%;
+                border-collapse: collapse;
+                font-size: 11px;
+              }
+              table thead {
+                background: #1a1a1a;
+              }
+              table th {
+                color: white;
+                padding: 10px 12px;
+                text-align: left;
+                font-size: 10px;
+                text-transform: uppercase;
+                letter-spacing: 0.5px;
+                font-weight: 700;
+              }
+              table th:last-child,
+              table td:last-child {
+                text-align: right;
+              }
+              table td {
+                padding: 9px 12px;
+                border-bottom: 1px solid #e9ecef;
+                color: #1a1a1a;
+              }
+              table tbody tr:last-child td {
+                border-bottom: none;
+              }
+              table tbody tr:hover {
+                background: #f8f9fa;
+              }
+              .text-center {
+                text-align: center;
+              }
+              .text-right {
+                text-align: right;
+              }
+              .font-mono {
+                font-family: 'Courier New', monospace;
+                font-weight: 600;
+              }
+              .product-name {
+                font-weight: 600;
+                color: #1a1a1a;
+              }
+              .product-part {
+                font-size: 9px;
+                color: #6c757d;
+                font-weight: 400;
+              }
+              
+              /* Totals Section */
+              .totals-section {
+                display: flex;
+                justify-content: flex-end;
+                margin-top: 20px;
+              }
+              .totals-box {
+                width: 350px;
+                padding: 15px 20px;
+                background: #f8f9fa;
+                border-radius: 6px;
+                border: 1px solid #e9ecef;
+              }
+              .totals-row {
+                display: flex;
+                justify-content: space-between;
+                padding: 4px 0;
+                font-size: 12px;
+              }
+              .totals-row .label {
+                color: #6c757d;
+              }
+              .totals-row .amount {
+                font-weight: 600;
+                font-family: 'Courier New', monospace;
+              }
+              .totals-row.discount .amount {
+                color: #dc3545;
+              }
+              .totals-row.grand-total {
+                border-top: 3px double #1a1a1a;
+                padding-top: 10px;
+                margin-top: 6px;
+                font-size: 16px;
+              }
+              .totals-row.grand-total .label {
+                font-weight: 700;
+                color: #1a1a1a;
+                font-size: 15px;
+              }
+              .totals-row.grand-total .amount {
+                font-size: 20px;
+                color: #28a745;
+                font-weight: 800;
+              }
+              
+              /* Amount in Words */
+              .amount-words {
+                margin-top: 15px;
+                padding: 10px 15px;
+                background: #f8f9fa;
+                border: 1px solid #e9ecef;
+                border-radius: 6px;
+                font-size: 11px;
+                color: #495057;
+              }
+              .amount-words strong {
+                color: #1a1a1a;
+                font-weight: 700;
+              }
+              
+              /* Footer */
+              .footer-section {
+                margin-top: 30px;
+                padding-top: 20px;
+                border-top: 2px solid #1a1a1a;
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-end;
+              }
+              .footer-left {
+                font-size: 10px;
+                color: #6c757d;
+              }
+              .footer-right {
+                text-align: right;
+                font-size: 10px;
+                color: #6c757d;
+              }
+              .signature-area {
+                margin-top: 10px;
+                padding-top: 10px;
+                border-top: 1px dashed #dee2e6;
+                display: flex;
+                justify-content: space-between;
+                gap: 40px;
+              }
+              .signature-item {
+                flex: 1;
+                text-align: center;
+              }
+              .signature-item .line {
+                margin-top: 30px;
+                border-top: 1px solid #1a1a1a;
+                width: 150px;
+                display: inline-block;
+              }
+              .signature-item .label {
+                font-size: 9px;
+                color: #6c757d;
+                margin-top: 4px;
+                display: block;
+              }
+              
+              .remarks-section {
+                margin-top: 15px;
+                padding: 10px 15px;
+                background: #fff3cd;
+                border-left: 4px solid #ffc107;
+                border-radius: 4px;
+                font-size: 11px;
+                color: #856404;
+              }
+              .remarks-section strong {
+                color: #1a1a1a;
+              }
+              
+              @media print {
+                body {
+                  padding: 0;
+                }
+                .no-print {
+                  display: none !important;
+                }
+                .info-grid {
+                  background: #f8f9fa !important;
+                  -webkit-print-color-adjust: exact !important;
+                  print-color-adjust: exact !important;
+                }
+                table thead {
+                  background: #1a1a1a !important;
+                  -webkit-print-color-adjust: exact !important;
+                  print-color-adjust: exact !important;
+                }
+                .badge-paid {
+                  -webkit-print-color-adjust: exact !important;
+                  print-color-adjust: exact !important;
+                }
+                .badge-partial {
+                  -webkit-print-color-adjust: exact !important;
+                  print-color-adjust: exact !important;
+                }
+                .badge-unpaid {
+                  -webkit-print-color-adjust: exact !important;
+                  print-color-adjust: exact !important;
+                }
+                .remarks-section {
+                  -webkit-print-color-adjust: exact !important;
+                  print-color-adjust: exact !important;
+                }
+              }
+            </style>
+          </head>
+          <body>
+            <div class="invoice-wrapper">
+              <!-- Header -->
+              <div class="header-section">
+                <div class="company-info">
+                  <div class="company-name">${companyInfo.name}</div>
+                  <div class="company-details">
+                    <i>📍</i> ${companyInfo.address}<br>
+                    <i>📞</i> ${companyInfo.phone} &nbsp;|&nbsp; <i>✉️</i> ${companyInfo.email}
+                  </div>
+                </div>
+                <div class="invoice-title">
+                  <h2>INVOICE</h2>
+                  <div class="invoice-number">#${sale?.invoice_number || "N/A"}</div>
+                  <div class="invoice-status">
+                    <span class="badge ${sale?.payment_status === 'Paid' ? 'badge-paid' : sale?.payment_status === 'Partial' ? 'badge-partial' : 'badge-unpaid'}">
+                      ${sale?.payment_status || "Unpaid"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Info Grid -->
+              <div class="info-grid">
+                <div class="info-box">
+                  <h4>Bill To</h4>
+                  <div class="value">${getCustomerName(sale?.customer)}</div>
+                  ${(() => {
+                    const customer = getCustomerDetails(sale?.customer);
+                    if (customer) {
+                      return `
+                        <div class="sub-info">
+                          ${customer.proprietor_name ? `<i>👤</i> ${customer.proprietor_name}<br>` : ""}
+                          ${customer.phone ? `<i>📞</i> ${customer.phone}<br>` : ""}
+                          ${customer.email ? `<i>✉️</i> ${customer.email}<br>` : ""}
+                          ${customer.address ? `<i>📍</i> ${customer.address}` : ""}
+                        </div>
+                      `;
+                    }
+                    return "";
+                  })()}
+                </div>
+                <div class="info-box" style="text-align:right;">
+                  <h4>Invoice Details</h4>
+                  <div class="value" style="font-size:13px;">${formatDate(sale?.sale_date)}</div>
+                  <div class="sub-info">
+                    <i>👤</i> Sold By: ${getEmployeeName(sale?.sold_by)}
+                  </div>
+                  <div class="sub-info">
+                    <i>📋</i> Invoice Date: ${formatDateShort(sale?.sale_date)}
+                  </div>
+                </div>
+              </div>
+
+              <!-- Products Table -->
+              <div class="table-container">
+                <table>
+                  <thead>
+                    <tr>
+                      <th style="width:40px;text-align:center;">#</th>
+                      <th style="width:40%;">Product Description</th>
+                      <th style="width:60px;text-align:center;">Qty</th>
+                      <th style="width:100px;text-align:right;">Unit Price</th>
+                      <th style="width:120px;text-align:right;">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${sale?.items?.map((item, index) => `
+                      <tr>
+                        <td style="text-align:center;">${index + 1}</td>
+                        <td>
+                          <div class="product-name">${item.product_name}</div>
+                          <div class="product-part">Part #: ${getProductPartNumber(item)} | Brand: ${getProductBrand(item)}</div>
+                        </td>
+                        <td style="text-align:center;font-weight:600;">${item.quantity}</td>
+                        <td style="text-align:right;font-family:'Courier New',monospace;">${formatCurrency(item.unit_price_bdt)}</td>
+                        <td style="text-align:right;font-family:'Courier New',monospace;font-weight:600;">${formatCurrency(item.total_price_bdt)}</td>
+                      </tr>
+                    `).join('') || '<tr><td colspan="5" style="text-align:center;color:#999;padding:20px;">No items found</td></tr>'}
+                  </tbody>
+                </table>
+              </div>
+
+              <!-- Totals -->
+              <div class="totals-section">
+                <div class="totals-box">
+                  <div class="totals-row">
+                    <span class="label">Subtotal</span>
+                    <span class="amount">${formatCurrency(totals.subtotal)}</span>
+                  </div>
+                  ${totals.discount > 0 ? `
+                    <div class="totals-row discount">
+                      <span class="label">Discount</span>
+                      <span class="amount">-${formatCurrency(totals.discount)}</span>
+                    </div>
+                  ` : ''}
+                  ${totals.tax > 0 ? `
+                    <div class="totals-row">
+                      <span class="label">Tax</span>
+                      <span class="amount">${formatCurrency(totals.tax)}</span>
+                    </div>
+                  ` : ''}
+                  <div class="totals-row grand-total">
+                    <span class="label">Grand Total</span>
+                    <span class="amount">${formatCurrency(totals.total)}</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Amount in Words -->
+              <div class="amount-words">
+                <strong>Amount in Words:</strong> ${formatCurrencyWords(totals.total)}
+              </div>
+
+              <!-- Remarks -->
+              ${sale?.remarks ? `
+                <div class="remarks-section">
+                  <strong>📝 Remarks:</strong> ${sale.remarks}
+                </div>
+              ` : ''}
+
+              <!-- Footer -->
+              <div class="footer-section">
+                <div class="footer-left">
+                  <p>Thank you for your business!</p>
+                  <p style="font-size:9px;color:#999;margin-top:3px;">
+                    This is a computer-generated invoice.
+                  </p>
+                </div>
+                <div class="footer-right">
+                  <p>Invoice #${sale?.invoice_number}</p>
+                  <p style="font-size:9px;color:#999;">Generated: ${new Date().toLocaleString()}</p>
+                </div>
+              </div>
+
+              <!-- Signature Area -->
+              <div class="signature-area">
+                <div class="signature-item">
+                  <div class="line"></div>
+                  <span class="label">Customer Signature</span>
+                </div>
+                <div class="signature-item">
+                  <div class="line"></div>
+                  <span class="label">Authorized Signature</span>
+                </div>
+                <div class="signature-item">
+                  <div class="line"></div>
+                  <span class="label">Company Stamp</span>
+                </div>
+              </div>
+            </div>
+          </body>
+        </html>
+      `);
+
+      WinPrint.document.close();
+      
+      setTimeout(() => {
+        WinPrint.focus();
+        WinPrint.print();
+        setTimeout(() => {
+          WinPrint.close();
+          setPrinting(false);
+        }, 500);
+      }, 500);
+
+    } catch (err) {
+      console.error("Print error:", err);
+      alert("Failed to generate print preview. Please try again.");
+      setPrinting(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="max-w-6xl mx-auto p-4">
+        <div className="bg-white border border-gray-300 p-8 text-center">
+          <div className="animate-pulse text-gray-400">Loading sale details...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (error || !sale) {
+    return (
+      <div className="max-w-6xl mx-auto p-4">
+        <div className="bg-white border border-red-300 p-8 text-center">
+          <p className="text-red-600">{error || "Sale not found"}</p>
+          <button
+            onClick={() => navigate(-1)}
+            className="mt-4 px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700"
+          >
+            Go Back
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const totals = calculateTotals();
+
+  return (
+    <div className="max-w-6xl mx-auto p-3">
+      {/* Header Actions */}
+      <div className="flex flex-wrap justify-between items-center gap-2 mb-4 bg-white border border-gray-300 p-3 no-print">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => navigate(-1)}
+            className="text-gray-600 hover:text-gray-800 p-1.5 border border-gray-300 rounded hover:bg-gray-50"
+          >
+            <FiArrowLeft size={20} />
+          </button>
+          <div>
+            <h1 className="text-xl font-bold flex items-center gap-2">
+              <FiFileText className="text-blue-600" />
+              Sale Details
+            </h1>
+            <p className="text-xs text-gray-500">
+              Invoice #{sale.invoice_number}
+            </p>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={handlePrint}
+            disabled={printing}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-semibold transition disabled:opacity-50"
+          >
+            <FiPrinter />
+            {printing ? "Preparing..." : "Print / PDF"}
+          </button>
+          <button
+            onClick={() => navigate(`/dashboard/sales/edit/${sale.id}`)}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded font-semibold transition"
+          >
+            <FiFileText />
+            Edit
+          </button>
+        </div>
+      </div>
+
+      {/* Hidden Print Content */}
+      <div style={{ display: 'none' }}>
+        <div ref={printRef}>
+          {/* Print content is generated in handlePrint */}
+        </div>
+      </div>
+
+      {/* Sale Summary Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-4 no-print">
+        <div className="bg-white border border-gray-300 p-3">
+          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1">
+            <FiUser size={12} /> Customer
+          </p>
+          <p className="text-sm font-bold text-gray-800 truncate">
+            {getCustomerName(sale.customer)}
+          </p>
+        </div>
+        <div className="bg-white border border-gray-300 p-3">
+          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1">
+            <FiUserCheck size={12} /> Sold By
+          </p>
+          <p className="text-sm font-bold text-gray-800 truncate">
+            {getEmployeeName(sale.sold_by)}
+          </p>
+        </div>
+        <div className="bg-white border border-gray-300 p-3">
+          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1">
+            <FiCalendar size={12} /> Date
+          </p>
+          <p className="text-sm font-bold text-gray-800 truncate">
+            {formatDate(sale.sale_date)}
+          </p>
+        </div>
+        <div className="bg-white border border-gray-300 p-3">
+          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider flex items-center gap-1">
+            <FiDollarSign size={12} /> Total
+          </p>
+          <p className="text-sm font-bold text-green-600 truncate">
+            {formatCurrency(totals.total)}
+          </p>
+        </div>
+      </div>
+
+      {/* Status & Payment Info */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4 no-print">
+        <div className="bg-white border border-gray-300 p-3 flex items-center gap-3">
+          <div className={`p-2 rounded-full ${
+            sale.payment_status === 'Paid' ? 'bg-green-100' :
+            sale.payment_status === 'Partial' ? 'bg-amber-100' : 'bg-red-100'
+          }`}>
+            {sale.payment_status === 'Paid' ? <FiCheckCircle className="text-green-600" size={20} /> :
+             sale.payment_status === 'Partial' ? <FiClock className="text-amber-600" size={20} /> :
+             <FiXCircle className="text-red-600" size={20} />}
+          </div>
+          <div>
+            <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+              Payment Status
+            </p>
+            <p className={`font-bold ${
+              sale.payment_status === 'Paid' ? 'text-green-600' :
+              sale.payment_status === 'Partial' ? 'text-amber-600' : 'text-red-600'
+            }`}>
+              {sale.payment_status || "Unpaid"}
+            </p>
+          </div>
+        </div>
+        <div className="bg-white border border-gray-300 p-3">
+          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+            Discount
+          </p>
+          <p className="font-bold text-red-600">
+            {formatCurrency(totals.discount)}
+          </p>
+        </div>
+        <div className="bg-white border border-gray-300 p-3">
+          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+            Items Count
+          </p>
+          <p className="font-bold text-gray-800">
+            {sale.items?.length || 0} products
+          </p>
+        </div>
+      </div>
+
+      {/* Products Table */}
+      <div className="bg-white border border-gray-300 overflow-hidden mb-4 no-print">
+        <div className="border-b border-gray-300 px-3 py-2 bg-gray-50 flex justify-between items-center">
+          <h3 className="text-xs font-bold text-gray-600 uppercase tracking-wider flex items-center gap-2">
+            <FiPackage /> Products Sold
+          </h3>
+          <span className="text-xs text-gray-500">
+            {sale.items?.length || 0} items
+          </span>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-sm">
+            <thead>
+              <tr className="bg-gray-800 text-white">
+                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
+                  SL
+                </th>
+                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-left">
+                  Part No / Product
+                </th>
+                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
+                  Qty
+                </th>
+                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-right">
+                  Unit Price
+                </th>
+                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-right">
+                  Total
+                </th>
+                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-right text-emerald-300">
+                  Profit
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {sale.items && sale.items.length > 0 ? (
+                sale.items.map((item, idx) => {
+                  const partNumber = getProductPartNumber(item);
+                  return (
+                    <tr key={idx} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                      <td className="border border-gray-300 px-2 py-1.5 text-center text-xs">
+                        {idx + 1}
+                      </td>
+                      <td className="border border-gray-300 px-2 py-1.5">
+                        <div className="text-xs font-bold text-gray-800">
+                          {partNumber}
+                        </div>
+                        <div className="text-[10px] text-gray-500">
+                          {item.product_name}
+                        </div>
+                        <div className="text-[10px] text-gray-400">
+                          Brand: {getProductBrand(item)}
+                        </div>
+                      </td>
+                      <td className="border border-gray-300 px-2 py-1.5 text-center text-xs font-semibold">
+                        {item.quantity}
+                      </td>
+                      <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-xs">
+                        {formatCurrency(item.unit_price_bdt)}
+                      </td>
+                      <td className="border border-gray-300 px-2 py-1.5 text-right font-mono font-bold text-xs text-gray-800">
+                        {formatCurrency(item.total_price_bdt)}
+                      </td>
+                      <td className="border border-gray-300 px-2 py-1.5 text-right font-mono font-bold text-emerald-600 text-xs">
+                        {item.profit_bdt ? formatCurrency(item.profit_bdt) : "—"}
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan="6" className="border border-gray-300 px-3 py-6 text-center text-gray-400 text-sm">
+                    No products in this sale.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+            <tfoot>
+              <tr className="bg-gray-50 font-bold">
+                <td colSpan="4" className="border border-gray-300 px-2 py-1.5 text-right text-xs uppercase text-gray-600">
+                  Subtotal
+                </td>
+                <td className="border border-gray-300 px-2 py-1.5 text-right font-mono">
+                  {formatCurrency(totals.subtotal)}
+                </td>
+                <td className="border border-gray-300 px-2 py-1.5"></td>
+              </tr>
+              {totals.discount > 0 && (
+                <tr className="bg-gray-50">
+                  <td colSpan="4" className="border border-gray-300 px-2 py-1.5 text-right text-xs uppercase text-red-600">
+                    Discount
+                  </td>
+                  <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-red-600">
+                    -{formatCurrency(totals.discount)}
+                  </td>
+                  <td className="border border-gray-300 px-2 py-1.5"></td>
+                </tr>
+              )}
+              {totals.tax > 0 && (
+                <tr className="bg-gray-50">
+                  <td colSpan="4" className="border border-gray-300 px-2 py-1.5 text-right text-xs uppercase text-gray-600">
+                    Tax
+                  </td>
+                  <td className="border border-gray-300 px-2 py-1.5 text-right font-mono">
+                    {formatCurrency(totals.tax)}
+                  </td>
+                  <td className="border border-gray-300 px-2 py-1.5"></td>
+                </tr>
+              )}
+              <tr className="bg-green-50 font-bold">
+                <td colSpan="4" className="border border-gray-300 px-2 py-1.5 text-right text-sm uppercase text-green-700">
+                  Grand Total
+                </td>
+                <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-base text-green-700">
+                  {formatCurrency(totals.total)}
+                </td>
+                <td className="border border-gray-300 px-2 py-1.5"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+
+      {/* Amount in Words */}
+      <div className="bg-white border border-gray-300 p-3 mb-4 no-print">
+        <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">
+          Amount in Words
+        </p>
+        <p className="text-sm font-medium text-gray-800">
+          {formatCurrencyWords(totals.total)}
+        </p>
+      </div>
+
+      {/* Remarks */}
+      {sale.remarks && (
+        <div className="bg-white border border-gray-300 p-3 mb-4 no-print">
+          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">
+            Remarks
+          </p>
+          <p className="text-sm text-gray-700">{sale.remarks}</p>
+        </div>
+      )}
+
+      {/* Bottom Actions */}
+      <div className="flex justify-end gap-2 mt-4 no-print">
+        <button
+          onClick={() => navigate(-1)}
+          className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 border border-gray-300 rounded hover:bg-gray-50"
+        >
+          Back to Sales
+        </button>
+        <button
+          onClick={handlePrint}
+          disabled={printing}
+          className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-semibold transition disabled:opacity-50"
+        >
+          <FiPrinter />
+          {printing ? "Preparing..." : "Print / PDF"}
+        </button>
+      </div>
+    </div>
+  );
+}

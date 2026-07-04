@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import axiosInstance from "../../../api/axios";
 import {
   FiPlus,
@@ -15,6 +15,7 @@ import {
 } from "react-icons/fi";
 
 export default function SaleHistory() {
+  const navigate = useNavigate();
   const [sales, setSales] = useState([]);
   const [products, setProducts] = useState([]);
   const [customers, setCustomers] = useState([]);
@@ -100,7 +101,12 @@ export default function SaleHistory() {
     return { total, count, latest };
   }, [sales]);
 
-  // --- EDIT / VIEW ---
+  // --- VIEW SALE (Navigate to detailed view) ---
+  const handleViewSale = (saleId) => {
+    navigate(`/dashboard/sales/view/${saleId}`);
+  };
+
+  // --- EDIT / VIEW (Modal) ---
   const openEditModal = (sale) => {
     setEditFormData({
       id: sale.id,
@@ -329,11 +335,18 @@ export default function SaleHistory() {
                         <td className="border border-gray-300 px-2 py-1.5 text-center">
                           <div className="flex justify-center items-center gap-1">
                             <button
-                              onClick={() => openEditModal(sale)}
+                              onClick={() => handleViewSale(sale.id)}
                               className="text-blue-600 hover:text-blue-800 transition p-0.5"
-                              title="View / Edit"
+                              title="View Full Details"
                             >
                               <FiEye size={15} />
+                            </button>
+                            <button
+                              onClick={() => openEditModal(sale)}
+                              className="text-green-600 hover:text-green-800 transition p-0.5"
+                              title="Quick Edit"
+                            >
+                              <FiSave size={15} />
                             </button>
                             <button
                               onClick={() => handleDelete(sale.id)}
