@@ -402,7 +402,7 @@ export default function AdminSidebar() {
           flex flex-col min-h-screen text-slate-200 glass-panel
           border-r border-white/10 shadow-[8px_0_40px_rgba(0,0,0,0.45)]
           touch-manipulation
-          ${isMobile ? 'fixed inset-y-0 left-0 z-50' : 'desktop-sidebar'}
+          ${q ? 'fixed inset-y-0 left-0 z-50' : 'desktop-sidebar'}
           ${isMobile ? `transform transition-transform duration-400 ease-[cubic-bezier(0.16,1,0.3,1)]
           ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full'}` : ''}
           ${!isMobile ? 'w-[220px]' : 'w-[85vw] max-w-[320px]'}
