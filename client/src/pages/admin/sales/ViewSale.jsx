@@ -217,6 +217,8 @@ export default function ViewSale() {
       const due = totals.total - paid;
       const previousBalance = parseFloat(sale?.previous_balance || 0);
       const currentBalance = previousBalance + due;
+      // Rows in the totals block: Total, (Less/Add.), Grand Total, Previous Balance, Paid, Current Balance
+      const totalsRowCount = totals.discount > 0 ? 6 : 5;
 
       WinPrint.document.write(`
         <html>
@@ -289,21 +291,22 @@ export default function ViewSale() {
                 margin-bottom: 3px;
                 width: 100%;
               }
-              /* ── Customer Info Table ── */
+              /* ── Customer Info Table (half width, compact) ── */
               table.customer-info {
-                width: 100%;
+                width: 50%;
                 border-collapse: collapse;
                 margin-bottom: 12px;
                 border: 1px solid #000;
+                font-size: 11px;
               }
               table.customer-info td {
                 border: 1px solid #000;
-                padding: 4px 8px;
-                font-size: 12px;
+                padding: 2px 6px;
+                font-size: 11px;
               }
               table.customer-info .label {
                 font-weight: bold;
-                width: 15%;
+                width: 25%;
               }
               /* ── Items table (fully bordered, B&W) ── */
               table.items {
@@ -311,26 +314,31 @@ export default function ViewSale() {
                 border-collapse: collapse;
                 font-size: 12px;
                 border: 1px solid #000;
+                table-layout: fixed;
               }
               table.items th,
               table.items td {
                 border: 1px solid #000;
                 padding: 5px 6px;
                 vertical-align: middle;
+                word-wrap: break-word;
               }
               table.items th {
                 font-weight: bold;
                 text-align: center;
                 background: #f0f0f0;
+                text-transform: capitalize;
               }
-              .col-sl { width: 5%; text-align: center; }
-              .col-part-no { width: 13%; text-align: center; }
-              .col-part-name { width: 27%; text-align: center; }
-              .col-qty { width: 7%; text-align: center; }
-              .col-mrp { width: 10%; text-align: center; }
-              .col-percent { width: 8%; text-align: center; }
+              /* Sl 4 + Part no 12 + Brand 10 + Product name 26 + Qty 6 + Mrp 12 + % 6 + Price 12 + Total 12 = 100 */
+              .col-sl { width: 4%; text-align: center; }
+              .col-part-no { width: 12%; text-align: center; }
+              .col-brand { width: 10%; text-align: center; }
+              .col-part-name { width: 26%; text-align: center; }
+              .col-qty { width: 6%; text-align: center; }
+              .col-mrp { width: 12%; text-align: center; }
+              .col-percent { width: 6%; text-align: center; }
               .col-price { width: 12%; text-align: center; }
-              .col-total { width: 15%; text-align: center; }
+              .col-total { width: 12%; text-align: center; }
               td.num { text-align: right; }
               td.ctr { text-align: center; }
               td.part-no { text-align: left; }
@@ -338,7 +346,7 @@ export default function ViewSale() {
               .item-meta { font-size: 10px; color: #555; }
               /* Totals rows inside the table */
               .totals-label {
-                text-align: left;
+                text-align: right;
                 font-weight: normal;
               }
               .words-cell {
@@ -347,44 +355,22 @@ export default function ViewSale() {
                 font-size: 11px;
               }
               /* ── Balance rows inside table ── */
-              .balance-label {
+              .totals-label,
+                .balance-label {
                 text-align: right;
                 font-weight: normal;
-                font-size: 12px;
+                 font-size: 12px;
+                 white-space: nowrap;
               }
               .balance-value {
                 text-align: right;
-                font-weight: bold;
+                font-weight: normal;
                 font-size: 12px;
               }
               /* ── Received note ── */
               .received-note {
                 font-size: 12px;
                 margin: 10px 0 18px;
-              }
-              /* ── Sale info table ── */
-              .section-title {
-                font-weight: bold;
-                font-size: 13px;
-                margin-bottom: 5px;
-                margin-top: 10px;
-              }
-              table.payments {
-                width: 100%;
-                border-collapse: collapse;
-                font-size: 12px;
-                margin-bottom: 15px;
-                border: 1px solid #000;
-              }
-              table.payments th,
-              table.payments td {
-                border: 1px solid #000;
-                padding: 4px 6px;
-                text-align: left;
-              }
-              table.payments th {
-                font-weight: bold;
-                background: #f0f0f0;
               }
               /* ── Footer / terms ── */
               .vat-note {
@@ -430,8 +416,7 @@ export default function ViewSale() {
                   <div class="logo">${COMPANY.name.toUpperCase()}</div>
                   <div class="company-name">${COMPANY.name}</div>
                   <div class="company-line">${COMPANY.addressLine1}</div>
-                  <div class="company-line">${COMPANY.addressLine2}</div>
-                  <div class="company-line">${COMPANY.addressLine3}</div>
+                  
                   <div class="company-line">${COMPANY.phone}</div>
                   <div class="company-line">${COMPANY.email}</div>
                 </div>
@@ -442,23 +427,27 @@ export default function ViewSale() {
                 </div>
               </div>
 
-              <!-- ── Customer Info Table ── -->
+              <!-- ── Customer Info Table (half width, compact) ── -->
               <table class="customer-info">
                 <tr>
                   <td class="label">Customer:</td>
-                  <td>${getCustomerName(sale?.customer)}</td>
-                  <td class="label">Phone:</td>
-                  <td>${customer?.phone || "N/A"}</td>
+                  <td colspan="3">${getCustomerName(sale?.customer)}</td>
                 </tr>
                 <tr>
                   <td class="label">Address:</td>
                   <td colspan="3">${customer?.address || "N/A"}</td>
                 </tr>
                 <tr>
+                  <td class="label">Phone:</td>
+                  <td colspan="3">${customer?.phone || "N/A"}</td>
+                </tr>
+                <tr>
+                  <td class="label">Email:</td>
+                  <td colspan="3">${customer?.email || "N/A"}</td>
+                </tr>
+                <tr>
                   <td class="label">Salesman:</td>
-                  <td>${getEmployeeName(sale?.sold_by)}</td>
-                  <td class="label">Date:</td>
-                  <td>${formatDateShort(sale?.sale_date)}</td>
+                  <td colspan="3">${getEmployeeName(sale?.sold_by)}</td>
                 </tr>
               </table>
 
@@ -466,14 +455,15 @@ export default function ViewSale() {
               <table class="items">
                 <thead>
                   <tr>
-                    <th class="col-sl">SL</th>
-                    <th class="col-part-no">PART NO.</th>
-                    <th class="col-part-name">PART NAME</th>
-                    <th class="col-qty">QTY</th>
-                    <th class="col-mrp">MRP (INR)</th>
+                    <th class="col-sl">Sl</th>
+                    <th class="col-part-no">Part no.</th>
+                    <th class="col-brand">Brand</th>
+                    <th class="col-part-name">Product name</th>
+                    <th class="col-qty">Qty</th>
+                    <th class="col-mrp">Mrp (inr)</th>
                     <th class="col-percent">%</th>
-                    <th class="col-price">PRICE</th>
-                    <th class="col-total">TOTAL</th>
+                    <th class="col-price">Price</th>
+                    <th class="col-total">Total</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -485,9 +475,9 @@ export default function ViewSale() {
                   <tr>
                     <td class="ctr">${index + 1}</td>
                     <td class="part-no" style="font-size:11px;">${getProductPartNumber(item)}</td>
+                    <td class="ctr" style="font-size:11px;">${getProductBrand(item)}</td>
                     <td>
                       <span class="item-name">${item.product_name}</span>
-                      <div class="item-meta">Brand: ${getProductBrand(item)}</div>
                     </td>
                     <td class="ctr">${item.quantity}</td>
                     <td class="num">${mrp ? formatNumber(mrp) : "—"}</td>
@@ -496,41 +486,37 @@ export default function ViewSale() {
                     <td class="num">${formatNumber(item.total_price_bdt)}</td>
                   </tr>
                   `;
-                  }).join("") || '<tr><td colspan="8" style="text-align:center;">No items found</td></tr>'}
-                  <!-- Totals and Balance rows -->
+                  }).join("") || '<tr><td colspan="9" style="text-align:center;">No items found</td></tr>'}
+                  <!-- Totals and Balance rows (labels span % + Price cols, values under Total col) -->
                   <tr>
-                    <td colspan="4" rowspan="${totals.discount > 0 ? 6 : 5}" class="words-cell" style="vertical-align:bottom; padding: 8px;">
+                    <td colspan="6" rowspan="${totalsRowCount}" class="words-cell" style="vertical-align:bottom; padding: 8px;">
                       <b>Amount In Words:</b> BDT ${numberToWords(totals.total)} Only
                     </td>
-                    <td colspan="2" class="totals-label"><b>Total</b></td>
-                    <td class="num" colspan="2"><b>${formatNumber(totals.subtotal)}</b></td>
+                    <td colspan="2" class="totals-label">Total</td>
+                    <td class="num" style="font-weight:normal;">${formatNumber(totals.subtotal)}</td>
                   </tr>
                   ${totals.discount > 0 ? `
                   <tr>
                     <td colspan="2" class="totals-label">Less/Add.</td>
-                    <td class="num" colspan="2">${formatNumber(totals.discount)}</td>
+                    <td class="num" style="font-weight:normal;">${formatNumber(totals.discount)}</td>
                   </tr>
                   ` : ""}
                   <tr>
-                    <td colspan="2" class="totals-label"><b>Grand Total</b></td>
-                    <td class="num" colspan="2"><b>${formatNumber(totals.total)}</b></td>
+                    <td colspan="2" class="totals-label">Grand Total</td>
+                    <td class="num" style="font-weight:normal;">${formatNumber(totals.total)}</td>
                   </tr>
                   <tr>
                     <td colspan="2" class="balance-label">Previous Balance</td>
-                    <td class="num balance-value" colspan="2">${formatNumber(previousBalance)}</td>
+                    <td class="num balance-value" style="font-weight:normal;">${formatNumber(previousBalance)}</td>
                   </tr>
                   <tr>
                     <td colspan="2" class="balance-label">Paid</td>
-                    <td class="num balance-value" colspan="2">${formatNumber(paid)}</td>
+                    <td class="num balance-value" style="font-weight:normal;">${formatNumber(paid)}</td>
                   </tr>
                   <tr>
-                    <td colspan="2" class="balance-label">Due</td>
-                    <td class="num balance-value" colspan="2">${formatNumber(due > 0 ? due : 0)}</td>
-                  </tr>
-                  <tr>
-                    <td colspan="2" class="balance-label"><b>Current Balance</b></td>
-                    <td class="num balance-value" colspan="2" style="color: ${currentBalance > 0 ? '#cc0000' : '#006600'};">
-                      <b>${formatNumber(currentBalance)}</b>
+                    <td colspan="2" class="balance-label">Current Balance</td>
+                    <td class="num balance-value" style="font-weight:normal;};">
+                      ${formatNumber(currentBalance)}
                     </td>
                   </tr>
                 </tbody>
@@ -539,37 +525,15 @@ export default function ViewSale() {
               <!-- ── Received note ── -->
               <div class="received-note">✓ Good received by customer in good condition.</div>
 
-              <!-- ── Sale info ── -->
-              <div class="section-title">Sale Information</div>
-              <table class="payments">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Sold By</th>
-                    <th>Payment Status</th>
-                    <th>Items</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr>
-                    <td>${formatDate(sale?.sale_date)}</td>
-                    <td>${getEmployeeName(sale?.sold_by)}</td>
-                    <td>${sale?.payment_status || "Unpaid"}</td>
-                    <td>${sale?.items?.length || 0}</td>
-                  </tr>
-                </tbody>
-              </table>
-
               ${sale?.remarks ? `<div class="vat-note"><b>Remarks:</b> ${sale.remarks}</div>` : ""}
-              <div class="vat-note">* VAT and TAX not included if not mentioned in the item field.</div>
+              <div class="vat-note"></div>
 
               <!-- ── Terms ── -->
               <div class="terms">
                 <div class="terms-title">Terms &amp; Conditions:</div>
                 <ol>
                   <li>Goods once sold will not be refunded &amp; changed.</li>
-                  <li>The products under warranty will be repaired or replaced by the manufacturing company.</li>
-                  <li>Timing for the warranty process will be controlled by the manufacturing company.</li>
+                  
                 </ol>
               </div>
 
@@ -672,8 +636,8 @@ export default function ViewSale() {
         </div>
       </div>
 
-      {/* Customer Info Table */}
-      <div className="bg-white border border-gray-300 overflow-hidden mb-4">
+      {/* Customer Info Table - Half Width */}
+      <div className="bg-white border border-gray-300 overflow-hidden mb-4 max-w-md">
         <div className="border-b border-gray-300 px-3 py-2 bg-gray-50">
           <h3 className="text-xs font-bold text-gray-600 uppercase tracking-wider flex items-center gap-2">
             <FiUser /> Customer Information
@@ -685,18 +649,22 @@ export default function ViewSale() {
               <tr>
                 <td className="font-semibold w-24 py-1">Customer:</td>
                 <td className="py-1">{getCustomerName(sale.customer)}</td>
+              </tr>
+              <tr>
+                <td className="font-semibold w-24 py-1">Address:</td>
+                <td className="py-1">{customer?.address || "N/A"}</td>
+              </tr>
+              <tr>
                 <td className="font-semibold w-24 py-1">Phone:</td>
                 <td className="py-1">{customer?.phone || "N/A"}</td>
               </tr>
               <tr>
-                <td className="font-semibold w-24 py-1">Address:</td>
-                <td className="py-1" colSpan="3">{customer?.address || "N/A"}</td>
+                <td className="font-semibold w-24 py-1">Email:</td>
+                <td className="py-1">{customer?.email || "N/A"}</td>
               </tr>
               <tr>
                 <td className="font-semibold w-24 py-1">Salesman:</td>
                 <td className="py-1">{getEmployeeName(sale.sold_by)}</td>
-                <td className="font-semibold w-24 py-1">Date:</td>
-                <td className="py-1">{formatDate(sale.sale_date)}</td>
               </tr>
             </tbody>
           </table>
@@ -774,7 +742,7 @@ export default function ViewSale() {
           <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
             Previous Balance
           </p>
-          <p className="font-bold text-amber-600">
+          <p className="text-amber-600">
             {formatCurrency(previousBalance)}
           </p>
         </div>
@@ -782,7 +750,7 @@ export default function ViewSale() {
           <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
             Current Balance
           </p>
-          <p className={`font-bold ${currentBalance > 0 ? 'text-red-600' : 'text-green-600'}`}>
+          <p className={`${currentBalance > 0 ? 'text-red-600' : 'text-green-600'}`}>
             {formatCurrency(currentBalance)}
           </p>
         </div>
@@ -803,19 +771,22 @@ export default function ViewSale() {
             <thead>
               <tr className="bg-gray-800 text-white">
                 <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
-                  SL
+                  Sl
                 </th>
                 <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
-                  Part No
+                  Part no
                 </th>
                 <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
-                  Product Name
+                  Brand
+                </th>
+                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
+                  Product name
                 </th>
                 <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
                   Qty
                 </th>
                 <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
-                  MRP (INR)
+                  Mrp (inr)
                 </th>
                 <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
                   %
@@ -848,12 +819,12 @@ export default function ViewSale() {
                           {partNumber}
                         </div>
                       </td>
+                      <td className="border border-gray-300 px-2 py-1.5 text-center text-xs text-gray-700">
+                        {getProductBrand(item)}
+                      </td>
                       <td className="border border-gray-300 px-2 py-1.5">
                         <div className="text-xs font-bold text-gray-800">
                           {item.product_name}
-                        </div>
-                        <div className="text-[10px] text-gray-400">
-                          Brand: {getProductBrand(item)}
                         </div>
                       </td>
                       <td className="border border-gray-300 px-2 py-1.5 text-center text-xs font-semibold">
@@ -879,7 +850,7 @@ export default function ViewSale() {
                 })
               ) : (
                 <tr>
-                  <td colSpan="9" className="border border-gray-300 px-3 py-6 text-center text-gray-400 text-sm">
+                  <td colSpan="10" className="border border-gray-300 px-3 py-6 text-center text-gray-400 text-sm">
                     No products in this sale.
                   </td>
                 </tr>
@@ -887,7 +858,7 @@ export default function ViewSale() {
             </tbody>
             <tfoot>
               <tr className="bg-gray-50 font-bold">
-                <td colSpan="7" className="border border-gray-300 px-2 py-1.5 text-right text-xs uppercase text-gray-600">
+                <td colSpan="8" className="border border-gray-300 px-2 py-1.5 text-right text-xs uppercase text-gray-600">
                   Subtotal
                 </td>
                 <td className="border border-gray-300 px-2 py-1.5 text-right font-mono">
@@ -897,7 +868,7 @@ export default function ViewSale() {
               </tr>
               {totals.discount > 0 && (
                 <tr className="bg-gray-50">
-                  <td colSpan="7" className="border border-gray-300 px-2 py-1.5 text-right text-xs uppercase text-red-600">
+                  <td colSpan="8" className="border border-gray-300 px-2 py-1.5 text-right text-xs uppercase text-red-600">
                     Discount
                   </td>
                   <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-red-600">
@@ -906,8 +877,8 @@ export default function ViewSale() {
                   <td className="border border-gray-300 px-2 py-1.5"></td>
                 </tr>
               )}
-              <tr className="bg-green-50 font-bold">
-                <td colSpan="7" className="border border-gray-300 px-2 py-1.5 text-right text-sm uppercase text-green-700">
+              <tr className="bg-green-50">
+                <td colSpan="8" className="border border-gray-300 px-2 py-1.5 text-right text-sm uppercase text-green-700">
                   Grand Total
                 </td>
                 <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-base text-green-700">
@@ -916,7 +887,7 @@ export default function ViewSale() {
                 <td className="border border-gray-300 px-2 py-1.5"></td>
               </tr>
               <tr className="bg-amber-50">
-                <td colSpan="7" className="border border-gray-300 px-2 py-1.5 text-right text-xs text-amber-700">
+                <td colSpan="8" className="border border-gray-300 px-2 py-1.5 text-right text-xs text-amber-700">
                   Previous Balance
                 </td>
                 <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-amber-700">
@@ -925,7 +896,7 @@ export default function ViewSale() {
                 <td className="border border-gray-300 px-2 py-1.5"></td>
               </tr>
               <tr className="bg-blue-50">
-                <td colSpan="7" className="border border-gray-300 px-2 py-1.5 text-right text-xs text-blue-700">
+                <td colSpan="8" className="border border-gray-300 px-2 py-1.5 text-right text-xs text-blue-700">
                   Paid
                 </td>
                 <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-blue-700">
@@ -933,17 +904,8 @@ export default function ViewSale() {
                 </td>
                 <td className="border border-gray-300 px-2 py-1.5"></td>
               </tr>
-              <tr className="bg-red-50">
-                <td colSpan="7" className="border border-gray-300 px-2 py-1.5 text-right text-xs text-red-700">
-                  Due
-                </td>
-                <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-red-700">
-                  {formatCurrency(due > 0 ? due : 0)}
-                </td>
-                <td className="border border-gray-300 px-2 py-1.5"></td>
-              </tr>
-              <tr className={`font-bold ${currentBalance > 0 ? 'bg-red-100' : 'bg-green-100'}`}>
-                <td colSpan="7" className={`border border-gray-300 px-2 py-1.5 text-right text-sm uppercase ${currentBalance > 0 ? 'text-red-700' : 'text-green-700'}`}>
+              <tr className={`${currentBalance > 0 ? 'bg-red-100' : 'bg-green-100'}`}>
+                <td colSpan="8" className={`border border-gray-300 px-2 py-1.5 text-right text-sm uppercase ${currentBalance > 0 ? 'text-red-700' : 'text-green-700'}`}>
                   Current Balance
                 </td>
                 <td className={`border border-gray-300 px-2 py-1.5 text-right font-mono text-base ${currentBalance > 0 ? 'text-red-700' : 'text-green-700'}`}>
