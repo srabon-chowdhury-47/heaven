@@ -28,7 +28,7 @@ class Payment(models.Model):
     payment_method = models.CharField(max_length=20, choices=METHOD_CHOICES, default='Cash')
     handled_by = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True)
     
-    # --- BANK SPECIFIC FIELDS ---
+    # --- BANK SPECIFI FIELDS ---
     bank_account_number = models.CharField(max_length=50, blank=True, null=True)
     bank_account_name = models.CharField(max_length=100, blank=True, null=True)
     bank_name = models.CharField(max_length=100, blank=True, null=True)

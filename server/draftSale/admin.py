@@ -7,6 +7,7 @@ class DraftSaleItemInline(admin.TabularInline):
     model = DraftSaleItem
     extra = 1
     readonly_fields = ('current_stock_display', 'total_price_bdt', 'profit_bdt')
+    fields = ('product', 'quantity', 'unit_price_bdt', 'multiplier', 'total_price_bdt', 'profit_bdt', 'current_stock_display')
 
     def current_stock_display(self, obj):
         if obj.product:

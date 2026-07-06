@@ -46,6 +46,9 @@ class Employee(models.Model):
     nagad_no = models.CharField(max_length=15, blank=True)
     rocket_no = models.CharField(max_length=15, blank=True)
 
+    # Financial Details
+    balance = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True)
+
     def save(self, *args, **kwargs):
         if not self.employee_id:
             self.employee_id = f"EMP-{uuid.uuid4().hex[:6].upper()}"
@@ -103,6 +106,9 @@ class Customer(models.Model):
     customer_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='Retail')
     referred_by = models.CharField(max_length=100, blank=True)
     note_remarks = models.TextField(blank=True)
+
+    # --- Financial Details ---
+    balance = models.DecimalField(max_digits=12, decimal_places=2, blank=True, null=True)
 
     # --- Meta Data ---
     entry_by = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True, help_text="Select the employee who added this record")
