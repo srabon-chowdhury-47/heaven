@@ -204,6 +204,9 @@ export default function ViewDraft() {
                     Part No / Product
                   </th>
                   <th className="border border-gray-300 px-3 py-2 text-center text-xs font-semibold uppercase tracking-wider">
+                    Multiplier
+                  </th>
+                  <th className="border border-gray-300 px-3 py-2 text-center text-xs font-semibold uppercase tracking-wider">
                     Qty
                   </th>
                   <th className="border border-gray-300 px-3 py-2 text-right text-xs font-semibold uppercase tracking-wider">
@@ -230,6 +233,9 @@ export default function ViewDraft() {
                           <div className="text-xs text-gray-500">
                             {item.product_name}
                           </div>
+                        </td>
+                        <td className="border border-gray-300 px-3 py-2 text-center">
+                          {item.multiplier}
                         </td>
                         <td className="border border-gray-300 px-3 py-2 text-center">
                           {item.quantity}

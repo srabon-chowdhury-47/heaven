@@ -12,6 +12,7 @@ import {
   FiSave,
   FiArrowLeft,
   FiSearch,
+  FiTrendingUp,
 } from "react-icons/fi";
 
 export default function AddDraftSale() {
@@ -52,7 +53,15 @@ export default function AddDraftSale() {
 
   // --- ITEM STATES ---
   const [manualItems, setManualItems] = useState([
-    { product: "", unit_price_bdt: "", quantity: "", search: "", showDropdown: false },
+    { 
+      product: "", 
+      purchase_price_bdt: "", 
+      multiplier: "", 
+      unit_price_bdt: "", 
+      quantity: "", 
+      search: "", 
+      showDropdown: false 
+    },
   ]);
   const [brandItems, setBrandItems] = useState([]);
 
@@ -134,9 +143,19 @@ export default function AddDraftSale() {
             const partNumber = product?.part_number || "";
             const productName = item.product_name || product?.product_name || product?.name || "";
             const searchText = partNumber ? `${partNumber} - ${productName}` : productName;
+            const purchasePrice = product?.purchase_cost_bdt || 0;
+            
+            // Get multiplier from the item data or calculate it
+            let multiplier = item.multiplier || "";
+            if (!multiplier && purchasePrice > 0 && parseFloat(item.unit_price_bdt) > 0) {
+              const salePrice = parseFloat(item.unit_price_bdt);
+              multiplier = (salePrice / purchasePrice).toFixed(2);
+            }
 
             return {
               product: item.product,
+              purchase_price_bdt: purchasePrice,
+              multiplier: multiplier,
               unit_price_bdt: parseFloat(item.unit_price_bdt).toFixed(2),
               quantity: item.quantity,
               search: searchText,
@@ -144,7 +163,16 @@ export default function AddDraftSale() {
             };
           });
           setManualItems(items);
-          setManualItems((prev) => [...prev, { product: "", unit_price_bdt: "", quantity: "", search: "", showDropdown: false }]);
+          // Add empty row at the end
+          setManualItems((prev) => [...prev, { 
+            product: "", 
+            purchase_price_bdt: "", 
+            multiplier: "", 
+            unit_price_bdt: "", 
+            quantity: "", 
+            search: "", 
+            showDropdown: false 
+          }]);
         }
 
         setFetchingDraft(false);
@@ -237,15 +265,35 @@ export default function AddDraftSale() {
     setOrderData({ ...orderData, [e.target.name]: e.target.value });
   };
 
+  // --- Calculate sale price from purchase price and multiplier ---
+  const calculateSalePrice = (purchasePrice, multiplier) => {
+    if (!purchasePrice || !multiplier) return "";
+    const price = parseFloat(purchasePrice);
+    const mult = parseFloat(multiplier);
+    if (isNaN(price) || isNaN(mult) || price <= 0 || mult <= 0) return "";
+    return (price * mult).toFixed(2);
+  };
+
+  // --- Calculate multiplier from purchase price and sale price ---
+  const calculateMultiplier = (purchasePrice, salePrice) => {
+    if (!purchasePrice || !salePrice) return "";
+    const cost = parseFloat(purchasePrice);
+    const price = parseFloat(salePrice);
+    if (isNaN(cost) || isNaN(price) || cost <= 0 || price <= 0) return "";
+    return (price / cost).toFixed(2);
+  };
+
   // --- MANUAL MODE ---
   const handleManualItemChange = (index, field, value) => {
     const newItems = [...manualItems];
+    
     if (field === "search") {
       newItems[index].search = value;
       newItems[index].showDropdown = true;
       setManualItems(newItems);
       return;
     }
+    
     if (field === "product") {
       const isDuplicate = manualItems.some(
         (item, i) => i !== index && String(item.product) === String(value)
@@ -257,18 +305,48 @@ export default function AddDraftSale() {
       const selectedProduct = products.find((p) => String(p.id) === String(value));
       if (selectedProduct) {
         newItems[index].product = value;
-        newItems[index].unit_price_bdt = selectedProduct.retail_price_bdt || 0;
+        const purchasePrice = selectedProduct.purchase_cost_bdt || 0;
+        newItems[index].purchase_price_bdt = purchasePrice;
+        newItems[index].multiplier = "";
+        newItems[index].unit_price_bdt = "";
         const partNum = selectedProduct.part_number || "";
         const name = selectedProduct.product_name || selectedProduct.name || "";
         newItems[index].search = partNum ? `${partNum} - ${name}` : name;
         newItems[index].showDropdown = false;
       }
+      // Add new empty row if this is the last row
       if (index === newItems.length - 1) {
-        newItems.push({ product: "", unit_price_bdt: "", quantity: "", search: "", showDropdown: false });
+        newItems.push({ 
+          product: "", 
+          purchase_price_bdt: "", 
+          multiplier: "", 
+          unit_price_bdt: "", 
+          quantity: "", 
+          search: "", 
+          showDropdown: false 
+        });
+      }
+    } else if (field === "multiplier") {
+      newItems[index].multiplier = value;
+      // Auto-calculate sale price from purchase price and multiplier
+      const salePrice = calculateSalePrice(newItems[index].purchase_price_bdt, value);
+      newItems[index].unit_price_bdt = salePrice;
+    } else if (field === "unit_price_bdt") {
+      newItems[index].unit_price_bdt = value;
+      // Auto-calculate multiplier from purchase price and sale price
+      const multiplier = calculateMultiplier(newItems[index].purchase_price_bdt, value);
+      newItems[index].multiplier = multiplier;
+    } else if (field === "purchase_price_bdt") {
+      newItems[index].purchase_price_bdt = value;
+      // Recalculate sale price if multiplier exists
+      if (newItems[index].multiplier) {
+        const salePrice = calculateSalePrice(value, newItems[index].multiplier);
+        newItems[index].unit_price_bdt = salePrice;
       }
     } else {
       newItems[index][field] = value;
     }
+    
     setManualItems(newItems);
   };
 
@@ -276,7 +354,15 @@ export default function AddDraftSale() {
     if (manualItems.length > 1) {
       setManualItems(manualItems.filter((_, i) => i !== index));
     } else {
-      setManualItems([{ product: "", unit_price_bdt: "", quantity: "", search: "", showDropdown: false }]);
+      setManualItems([{ 
+        product: "", 
+        purchase_price_bdt: "", 
+        multiplier: "", 
+        unit_price_bdt: "", 
+        quantity: "", 
+        search: "", 
+        showDropdown: false 
+      }]);
     }
   };
 
@@ -344,7 +430,8 @@ export default function AddDraftSale() {
           part_number: p.part_number || "",
           brand_name: getBrandName(p.brand),
           purchase_cost_bdt: p.purchase_cost_bdt || 0,
-          unit_price_bdt: p.retail_price_bdt || "",
+          multiplier: "",
+          unit_price_bdt: "",
           quantity: "",
         }));
         setBrandItems((currentItems) => {
@@ -361,7 +448,25 @@ export default function AddDraftSale() {
 
   const handleBrandItemChange = (index, field, value) => {
     const newItems = [...brandItems];
-    newItems[index][field] = value;
+    
+    if (field === "multiplier") {
+      newItems[index].multiplier = value;
+      const salePrice = calculateSalePrice(newItems[index].purchase_cost_bdt, value);
+      newItems[index].unit_price_bdt = salePrice;
+    } else if (field === "unit_price_bdt") {
+      newItems[index].unit_price_bdt = value;
+      const multiplier = calculateMultiplier(newItems[index].purchase_cost_bdt, value);
+      newItems[index].multiplier = multiplier;
+    } else if (field === "purchase_cost_bdt") {
+      newItems[index].purchase_cost_bdt = value;
+      if (newItems[index].multiplier) {
+        const salePrice = calculateSalePrice(value, newItems[index].multiplier);
+        newItems[index].unit_price_bdt = salePrice;
+      }
+    } else {
+      newItems[index][field] = value;
+    }
+    
     setBrandItems(newItems);
   };
 
@@ -441,6 +546,7 @@ export default function AddDraftSale() {
         product: item.product,
         quantity: parseInt(item.quantity, 10),
         unit_price_bdt: parseFloat(item.unit_price_bdt).toFixed(2),
+        multiplier: item.multiplier ? parseFloat(item.multiplier).toFixed(2) : null, // Include multiplier in payload
       })),
     };
 
@@ -595,7 +701,7 @@ export default function AddDraftSale() {
           </div>
         </div>
 
-        {/* --- ENTRY MODE TOGGLE (unchanged) --- */}
+        {/* --- ENTRY MODE TOGGLE --- */}
         <div className="bg-gray-50 border-b border-gray-300 px-3 py-1.5 flex gap-2">
           <button
             type="button"
@@ -624,7 +730,7 @@ export default function AddDraftSale() {
           {isEditing && <span className="text-xs text-gray-500 ml-2">(Brand mode disabled for editing)</span>}
         </div>
 
-        {/* --- BRAND SELECTOR (unchanged) --- */}
+        {/* --- BRAND SELECTOR --- */}
         {!isEditing && entryMode === "brand" && (
           <div className="bg-blue-50/50 border-b border-gray-300 px-3 py-2 flex flex-col md:flex-row md:items-center justify-between gap-2">
             <div className="flex-1 max-w-sm">
@@ -680,7 +786,7 @@ export default function AddDraftSale() {
           </div>
         )}
 
-        {/* --- ITEMS TABLE (unchanged) --- */}
+        {/* --- ITEMS TABLE --- */}
         <div className="overflow-x-auto overflow-y-visible pb-24">
           <table className="w-full border-collapse text-sm">
             <thead>
@@ -690,10 +796,13 @@ export default function AddDraftSale() {
                   Product & Brand
                 </th>
                 <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
-                  Purch. Cost
+                  Purchase Price
                 </th>
                 <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
-                  Sell Price
+                  Multiplier (×)
+                </th>
+                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
+                  Sale Price
                 </th>
                 <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
                   Qty
@@ -720,6 +829,22 @@ export default function AddDraftSale() {
                     </td>
                     <td className="border border-gray-300 px-2 py-1.5 text-center font-mono text-gray-500 text-xs">
                       {parseFloat(item.purchase_cost_bdt).toFixed(2)}
+                    </td>
+                    <td className="border border-gray-300 px-2 py-1.5">
+                      <div className="flex items-center gap-0.5">
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="×"
+                          value={item.multiplier}
+                          onChange={(e) =>
+                            handleBrandItemChange(index, "multiplier", e.target.value)
+                          }
+                          className="w-full bg-white border border-gray-300 rounded p-0.5 text-xs text-center focus:ring-1 focus:ring-blue-500 outline-none"
+                        />
+                        <FiTrendingUp className="text-gray-400" size={12} />
+                      </div>
                     </td>
                     <td className="border border-gray-300 px-2 py-1.5">
                       <input
@@ -772,7 +897,7 @@ export default function AddDraftSale() {
                   const manualBrandName = selectedProd ? getBrandName(selectedProd.brand) : "";
                   const purchaseCost = selectedProd
                     ? parseFloat(selectedProd.purchase_cost_bdt).toFixed(2)
-                    : "-";
+                    : "";
                   const partNumber = selectedProd?.part_number || "";
 
                   const filteredProducts = getFilteredProducts(item.search || "");
@@ -806,6 +931,8 @@ export default function AddDraftSale() {
                                   const newItems = [...manualItems];
                                   newItems[index].product = "";
                                   newItems[index].search = "";
+                                  newItems[index].purchase_price_bdt = "";
+                                  newItems[index].multiplier = "";
                                   newItems[index].unit_price_bdt = "";
                                   newItems[index].showDropdown = false;
                                   setManualItems(newItems);
@@ -858,7 +985,33 @@ export default function AddDraftSale() {
                         )}
                       </td>
                       <td className="border border-gray-300 px-2 py-3 text-center font-mono text-gray-500 text-xs">
-                        {purchaseCost}
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          placeholder="0.00"
+                          value={item.purchase_price_bdt}
+                          onChange={(e) =>
+                            handleManualItemChange(index, "purchase_price_bdt", e.target.value)
+                          }
+                          className="w-full bg-white border border-gray-300 rounded p-1 text-xs text-center focus:ring-1 focus:ring-blue-500 outline-none"
+                        />
+                      </td>
+                      <td className="border border-gray-300 px-2 py-3">
+                        <div className="flex items-center gap-0.5">
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            placeholder="×"
+                            value={item.multiplier}
+                            onChange={(e) =>
+                              handleManualItemChange(index, "multiplier", e.target.value)
+                            }
+                            className="w-full bg-white border border-gray-300 rounded p-1 text-xs text-center focus:ring-1 focus:ring-blue-500 outline-none"
+                          />
+                          <FiTrendingUp className="text-gray-400" size={14} />
+                        </div>
                       </td>
                       <td className="border border-gray-300 px-2 py-3">
                         <input
@@ -909,7 +1062,7 @@ export default function AddDraftSale() {
 
               {entryMode === "brand" && brandItems.length === 0 && !isEditing && (
                 <tr>
-                  <td colSpan="7" className="border border-gray-300 px-3 py-4 text-center text-gray-400 text-sm">
+                  <td colSpan="8" className="border border-gray-300 px-3 py-4 text-center text-gray-400 text-sm">
                     Use the brand selector above to load products.
                   </td>
                 </tr>
@@ -924,7 +1077,15 @@ export default function AddDraftSale() {
             <button
               type="button"
               onClick={() =>
-                setManualItems([...manualItems, { product: "", unit_price_bdt: "", quantity: "", search: "", showDropdown: false }])
+                setManualItems([...manualItems, { 
+                  product: "", 
+                  purchase_price_bdt: "", 
+                  multiplier: "", 
+                  unit_price_bdt: "", 
+                  quantity: "", 
+                  search: "", 
+                  showDropdown: false 
+                }])
               }
               className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-semibold"
             >
@@ -954,7 +1115,7 @@ export default function AddDraftSale() {
         </div>
       </form>
 
-      {/* --- CUSTOMER MODAL (unchanged) --- */}
+      {/* --- CUSTOMER MODAL --- */}
       {isCustomerModalOpen && (
         <div className="fixed inset-0 bg-black/60 flex justify-center items-center z-50 p-3">
           <div className="bg-white border border-gray-300 w-full max-w-md rounded-lg overflow-hidden max-h-[90vh] flex flex-col">
