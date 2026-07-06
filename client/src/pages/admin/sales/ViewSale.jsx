@@ -14,6 +14,7 @@ import {
   FiClock,
   FiXCircle,
   FiDownload,
+  FiTrendingUp,
 } from "react-icons/fi";
 
 // ── Company info shown on the printed bill (edit these) ──
@@ -75,6 +76,7 @@ export default function ViewSale() {
 
   const [sale, setSale] = useState(null);
   const [products, setProducts] = useState([]);
+  const [brands, setBrands] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -88,15 +90,17 @@ export default function ViewSale() {
   const fetchSaleData = async () => {
     try {
       setLoading(true);
-      const [saleRes, prodRes, custRes, empRes] = await Promise.all([
+      const [saleRes, prodRes, brandRes, custRes, empRes] = await Promise.all([
         axiosInstance.get(`sale/sales/${id}/`),
         axiosInstance.get("products/"),
+        axiosInstance.get("brand/brands/"),
         axiosInstance.get("person/customers/"),
         axiosInstance.get("person/employees/"),
       ]);
 
       setSale(saleRes.data);
       setProducts(prodRes.data.results || prodRes.data);
+      setBrands(brandRes.data.results || brandRes.data);
       setCustomers(custRes.data.results || custRes.data);
       setEmployees(empRes.data.results || empRes.data);
       setError("");
@@ -129,19 +133,36 @@ export default function ViewSale() {
       : emp.full_name || emp.name || emp.employee_id;
   };
 
+  const getProductDetails = (productId) => {
+    if (!productId) return null;
+    return products.find((p) => String(p.id) === String(productId));
+  };
+
   const getProductPartNumber = (item) => {
     if (!item) return "N/A";
-    let product = products.find((p) => String(p.id) === String(item.product));
-    if (!product) {
-      product = products.find((p) => p.product_name === item.product_name);
-    }
+    const product = getProductDetails(item.product);
     return product?.part_number || "N/A";
   };
 
   const getProductBrand = (item) => {
     if (!item) return "N/A";
-    const product = products.find((p) => String(p.id) === String(item.product));
-    return product?.brand_name || product?.brand || "N/A";
+    const product = getProductDetails(item.product);
+    if (!product) return "N/A";
+    // Find brand by ID
+    const brand = brands.find((b) => String(b.id) === String(product.brand));
+    return brand?.name || "N/A";
+  };
+
+  const getProductPurchasePrice = (item) => {
+    if (!item) return 0;
+    const product = getProductDetails(item.product);
+    return product?.purchase_cost_bdt || 0;
+  };
+
+  const getProductName = (item) => {
+    if (!item) return "Unknown Product";
+    const product = getProductDetails(item.product);
+    return product?.product_name || item.product_name || "Unknown Product";
   };
 
   const formatDate = (dateString) => {
@@ -194,6 +215,20 @@ export default function ViewSale() {
     return diff.toFixed(1);
   };
 
+  // Get multiplier display
+  const getMultiplierDisplay = (item) => {
+    if (!item) return "N/A";
+    if (item.multiplier) {
+      return parseFloat(item.multiplier).toFixed(2);
+    }
+    const purchasePrice = getProductPurchasePrice(item);
+    const salePrice = parseFloat(item.unit_price_bdt || 0);
+    if (purchasePrice > 0 && salePrice > 0) {
+      return (salePrice / purchasePrice).toFixed(2);
+    }
+    return "N/A";
+  };
+
   // Print bill — layout styled like a standard computer shop invoice
   const handlePrint = async () => {
     setPrinting(true);
@@ -217,8 +252,6 @@ export default function ViewSale() {
       const due = totals.total - paid;
       const previousBalance = parseFloat(sale?.previous_balance || 0);
       const currentBalance = previousBalance + due;
-      // Rows in the totals block: Total, (Less/Add.), Grand Total, Previous Balance, Paid, Current Balance
-      const totalsRowCount = totals.discount > 0 ? 6 : 5;
 
       WinPrint.document.write(`
         <html>
@@ -247,7 +280,6 @@ export default function ViewSale() {
                 margin: 0 auto;
                 padding: 5px;
               }
-              /* ── Top header: company left, invoice box right ── */
               .top-header {
                 display: flex;
                 justify-content: space-between;
@@ -291,7 +323,6 @@ export default function ViewSale() {
                 margin-bottom: 3px;
                 width: 100%;
               }
-              /* ── Customer Info Table (half width, compact) ── */
               table.customer-info {
                 width: 50%;
                 border-collapse: collapse;
@@ -308,18 +339,17 @@ export default function ViewSale() {
                 font-weight: bold;
                 width: 25%;
               }
-              /* ── Items table (fully bordered, B&W) ── */
               table.items {
                 width: 100%;
                 border-collapse: collapse;
-                font-size: 12px;
+                font-size: 11px;
                 border: 1px solid #000;
                 table-layout: fixed;
               }
               table.items th,
               table.items td {
                 border: 1px solid #000;
-                padding: 5px 6px;
+                padding: 4px 5px;
                 vertical-align: middle;
                 word-wrap: break-word;
               }
@@ -328,23 +358,23 @@ export default function ViewSale() {
                 text-align: center;
                 background: #f0f0f0;
                 text-transform: capitalize;
+                font-size: 10px;
               }
-              /* Sl 4 + Part no 12 + Brand 10 + Product name 26 + Qty 6 + Mrp 12 + % 6 + Price 12 + Total 12 = 100 */
               .col-sl { width: 4%; text-align: center; }
-              .col-part-no { width: 12%; text-align: center; }
-              .col-brand { width: 10%; text-align: center; }
-              .col-part-name { width: 26%; text-align: center; }
+              .col-part-no { width: 11%; text-align: center; }
+              .col-brand { width: 8%; text-align: center; }
+              .col-part-name { width: 22%; text-align: center; }
+              .col-multiplier { width: 7%; text-align: center; }
               .col-qty { width: 6%; text-align: center; }
-              .col-mrp { width: 12%; text-align: center; }
+              .col-mrp { width: 10%; text-align: center; }
               .col-percent { width: 6%; text-align: center; }
-              .col-price { width: 12%; text-align: center; }
-              .col-total { width: 12%; text-align: center; }
+              .col-price { width: 11%; text-align: center; }
+              .col-total { width: 11%; text-align: center; }
               td.num { text-align: right; }
               td.ctr { text-align: center; }
               td.part-no { text-align: left; }
               .item-name { font-weight: normal; }
-              .item-meta { font-size: 10px; color: #555; }
-              /* Totals rows inside the table */
+              .item-meta { font-size: 9px; color: #555; }
               .totals-label {
                 text-align: right;
                 font-weight: normal;
@@ -354,25 +384,22 @@ export default function ViewSale() {
                 border: 1px solid #000;
                 font-size: 11px;
               }
-              /* ── Balance rows inside table ── */
               .totals-label,
-                .balance-label {
+              .balance-label {
                 text-align: right;
                 font-weight: normal;
-                 font-size: 12px;
-                 white-space: nowrap;
+                font-size: 12px;
+                white-space: nowrap;
               }
               .balance-value {
                 text-align: right;
                 font-weight: normal;
                 font-size: 12px;
               }
-              /* ── Received note ── */
               .received-note {
                 font-size: 12px;
                 margin: 10px 0 18px;
               }
-              /* ── Footer / terms ── */
               .vat-note {
                 font-size: 11px;
                 margin-bottom: 10px;
@@ -410,13 +437,11 @@ export default function ViewSale() {
           <body>
             <div class="invoice-container">
 
-              <!-- ── Header ── -->
               <div class="top-header">
                 <div class="company-block">
                   <div class="logo">${COMPANY.name.toUpperCase()}</div>
                   <div class="company-name">${COMPANY.name}</div>
                   <div class="company-line">${COMPANY.addressLine1}</div>
-                  
                   <div class="company-line">${COMPANY.phone}</div>
                   <div class="company-line">${COMPANY.email}</div>
                 </div>
@@ -427,7 +452,6 @@ export default function ViewSale() {
                 </div>
               </div>
 
-              <!-- ── Customer Info Table (half width, compact) ── -->
               <table class="customer-info">
                 <tr>
                   <td class="label">Customer:</td>
@@ -451,7 +475,6 @@ export default function ViewSale() {
                 </tr>
               </table>
 
-              <!-- ── Items table ── -->
               <table class="items">
                 <thead>
                   <tr>
@@ -459,6 +482,7 @@ export default function ViewSale() {
                     <th class="col-part-no">Part no.</th>
                     <th class="col-brand">Brand</th>
                     <th class="col-part-name">Product name</th>
+                    <th class="col-multiplier">×</th>
                     <th class="col-qty">Qty</th>
                     <th class="col-mrp">Mrp (inr)</th>
                     <th class="col-percent">%</th>
@@ -471,14 +495,19 @@ export default function ViewSale() {
                     const mrp = parseFloat(item.mrp_inr || 0);
                     const price = parseFloat(item.unit_price_bdt || 0);
                     const percentage = calculatePercentage(mrp, price);
+                    const multiplier = getMultiplierDisplay(item);
+                    const brandName = getProductBrand(item);
+                    const productName = getProductName(item);
+                    const partNumber = getProductPartNumber(item);
                     return `
                   <tr>
                     <td class="ctr">${index + 1}</td>
-                    <td class="part-no" style="font-size:11px;">${getProductPartNumber(item)}</td>
-                    <td class="ctr" style="font-size:11px;">${getProductBrand(item)}</td>
+                    <td class="part-no" style="font-size:11px;">${partNumber}</td>
+                    <td class="ctr" style="font-size:11px;">${brandName}</td>
                     <td>
-                      <span class="item-name">${item.product_name}</span>
+                      <span class="item-name">${productName}</span>
                     </td>
+                    <td class="ctr" style="font-size:11px;">${multiplier}</td>
                     <td class="ctr">${item.quantity}</td>
                     <td class="num">${mrp ? formatNumber(mrp) : "—"}</td>
                     <td class="ctr">${percentage ? percentage + "%" : "—"}</td>
@@ -486,10 +515,9 @@ export default function ViewSale() {
                     <td class="num">${formatNumber(item.total_price_bdt)}</td>
                   </tr>
                   `;
-                  }).join("") || '<tr><td colspan="9" style="text-align:center;">No items found</td></tr>'}
-                  <!-- Totals and Balance rows (labels span % + Price cols, values under Total col) -->
+                  }).join("") || '<tr><td colspan="10" style="text-align:center;">No items found</td></tr>'}
                   <tr>
-                    <td colspan="6" rowspan="${totalsRowCount}" class="words-cell" style="vertical-align:bottom; padding: 8px;">
+                    <td colspan="7" rowspan="${totals.discount > 0 ? 6 : 5}" class="words-cell" style="vertical-align:bottom; padding: 8px;">
                       <b>Amount In Words:</b> BDT ${numberToWords(totals.total)} Only
                     </td>
                     <td colspan="2" class="totals-label">Total</td>
@@ -515,25 +543,22 @@ export default function ViewSale() {
                   </tr>
                   <tr>
                     <td colspan="2" class="balance-label">Current Balance</td>
-                    <td class="num balance-value" style="font-weight:normal;};">
+                    <td class="num balance-value" style="font-weight:normal;">
                       ${formatNumber(currentBalance)}
                     </td>
                   </tr>
                 </tbody>
               </table>
 
-              <!-- ── Received note ── -->
               <div class="received-note">✓ Good received by customer in good condition.</div>
 
               ${sale?.remarks ? `<div class="vat-note"><b>Remarks:</b> ${sale.remarks}</div>` : ""}
               <div class="vat-note"></div>
 
-              <!-- ── Terms ── -->
               <div class="terms">
                 <div class="terms-title">Terms &amp; Conditions:</div>
                 <ol>
                   <li>Goods once sold will not be refunded &amp; changed.</li>
-                  
                 </ol>
               </div>
 
@@ -626,13 +651,6 @@ export default function ViewSale() {
             <FiPrinter />
             {printing ? "Preparing..." : "Print Bill"}
           </button>
-        </div>
-      </div>
-
-      {/* Hidden Print Content */}
-      <div style={{ display: 'none' }}>
-        <div ref={printRef}>
-          {/* Print content is generated in handlePrint */}
         </div>
       </div>
 
@@ -783,6 +801,9 @@ export default function ViewSale() {
                   Product name
                 </th>
                 <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
+                  ×
+                </th>
+                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
                   Qty
                 </th>
                 <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
@@ -806,9 +827,12 @@ export default function ViewSale() {
               {sale.items && sale.items.length > 0 ? (
                 sale.items.map((item, idx) => {
                   const partNumber = getProductPartNumber(item);
+                  const brandName = getProductBrand(item);
+                  const productName = getProductName(item);
                   const mrp = parseFloat(item.mrp_inr || 0);
                   const price = parseFloat(item.unit_price_bdt || 0);
                   const percentage = calculatePercentage(mrp, price);
+                  const multiplier = getMultiplierDisplay(item);
                   return (
                     <tr key={idx} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
                       <td className="border border-gray-300 px-2 py-1.5 text-center text-xs">
@@ -820,11 +844,17 @@ export default function ViewSale() {
                         </div>
                       </td>
                       <td className="border border-gray-300 px-2 py-1.5 text-center text-xs text-gray-700">
-                        {getProductBrand(item)}
+                        {brandName}
                       </td>
                       <td className="border border-gray-300 px-2 py-1.5">
                         <div className="text-xs font-bold text-gray-800">
-                          {item.product_name}
+                          {productName}
+                        </div>
+                      </td>
+                      <td className="border border-gray-300 px-2 py-1.5 text-center text-xs">
+                        <div className="flex items-center justify-center gap-1">
+                          <span className="font-mono font-medium">{multiplier}</span>
+                          <FiTrendingUp className="text-gray-400" size={10} />
                         </div>
                       </td>
                       <td className="border border-gray-300 px-2 py-1.5 text-center text-xs font-semibold">
@@ -850,7 +880,7 @@ export default function ViewSale() {
                 })
               ) : (
                 <tr>
-                  <td colSpan="10" className="border border-gray-300 px-3 py-6 text-center text-gray-400 text-sm">
+                  <td colSpan="11" className="border border-gray-300 px-3 py-6 text-center text-gray-400 text-sm">
                     No products in this sale.
                   </td>
                 </tr>
@@ -858,7 +888,7 @@ export default function ViewSale() {
             </tbody>
             <tfoot>
               <tr className="bg-gray-50 font-bold">
-                <td colSpan="8" className="border border-gray-300 px-2 py-1.5 text-right text-xs uppercase text-gray-600">
+                <td colSpan="9" className="border border-gray-300 px-2 py-1.5 text-right text-xs uppercase text-gray-600">
                   Subtotal
                 </td>
                 <td className="border border-gray-300 px-2 py-1.5 text-right font-mono">
@@ -868,7 +898,7 @@ export default function ViewSale() {
               </tr>
               {totals.discount > 0 && (
                 <tr className="bg-gray-50">
-                  <td colSpan="8" className="border border-gray-300 px-2 py-1.5 text-right text-xs uppercase text-red-600">
+                  <td colSpan="9" className="border border-gray-300 px-2 py-1.5 text-right text-xs uppercase text-red-600">
                     Discount
                   </td>
                   <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-red-600">
@@ -878,7 +908,7 @@ export default function ViewSale() {
                 </tr>
               )}
               <tr className="bg-green-50">
-                <td colSpan="8" className="border border-gray-300 px-2 py-1.5 text-right text-sm uppercase text-green-700">
+                <td colSpan="9" className="border border-gray-300 px-2 py-1.5 text-right text-sm uppercase text-green-700">
                   Grand Total
                 </td>
                 <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-base text-green-700">
@@ -887,7 +917,7 @@ export default function ViewSale() {
                 <td className="border border-gray-300 px-2 py-1.5"></td>
               </tr>
               <tr className="bg-amber-50">
-                <td colSpan="8" className="border border-gray-300 px-2 py-1.5 text-right text-xs text-amber-700">
+                <td colSpan="9" className="border border-gray-300 px-2 py-1.5 text-right text-xs text-amber-700">
                   Previous Balance
                 </td>
                 <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-amber-700">
@@ -896,7 +926,7 @@ export default function ViewSale() {
                 <td className="border border-gray-300 px-2 py-1.5"></td>
               </tr>
               <tr className="bg-blue-50">
-                <td colSpan="8" className="border border-gray-300 px-2 py-1.5 text-right text-xs text-blue-700">
+                <td colSpan="9" className="border border-gray-300 px-2 py-1.5 text-right text-xs text-blue-700">
                   Paid
                 </td>
                 <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-blue-700">
@@ -905,7 +935,7 @@ export default function ViewSale() {
                 <td className="border border-gray-300 px-2 py-1.5"></td>
               </tr>
               <tr className={`${currentBalance > 0 ? 'bg-red-100' : 'bg-green-100'}`}>
-                <td colSpan="8" className={`border border-gray-300 px-2 py-1.5 text-right text-sm uppercase ${currentBalance > 0 ? 'text-red-700' : 'text-green-700'}`}>
+                <td colSpan="9" className={`border border-gray-300 px-2 py-1.5 text-right text-sm uppercase ${currentBalance > 0 ? 'text-red-700' : 'text-green-700'}`}>
                   Current Balance
                 </td>
                 <td className={`border border-gray-300 px-2 py-1.5 text-right font-mono text-base ${currentBalance > 0 ? 'text-red-700' : 'text-green-700'}`}>

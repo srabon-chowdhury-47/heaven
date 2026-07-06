@@ -43,6 +43,7 @@ class SaleItemInline(admin.TabularInline):
     
     # Add our custom stock display column
     readonly_fields = ('current_stock_display', 'total_price_bdt', 'profit_bdt')
+    fields = ('product', 'quantity', 'unit_price_bdt', 'multiplier', 'total_price_bdt', 'profit_bdt', 'current_stock_display')
     
     # Custom column to show live stock
     def current_stock_display(self, obj):

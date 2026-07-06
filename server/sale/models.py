@@ -31,6 +31,8 @@ class SaleItem(models.Model):
     
     quantity = models.PositiveIntegerField()
     unit_price_bdt = models.DecimalField(max_digits=12, decimal_places=2)
+    multiplier = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, 
+                                    help_text="Multiplier used to calculate sale price from purchase price")
     total_price_bdt = models.DecimalField(max_digits=14, decimal_places=2, editable=False)
 
     # Automated Profit Tracking
