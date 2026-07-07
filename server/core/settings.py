@@ -40,7 +40,8 @@ INSTALLED_APPS = [
     'rest_framework',
     'rest_framework_simplejwt', # Required for your React Login
     'corsheaders',              # Allows React to talk to Django
-    'drf_spectacular',          # <-- ADDED FOR SWAGGER INTERACTIVE DOCUMENTATION
+    'drf_spectacular',
+    'rest_framework_simplejwt.token_blacklist',
     
     # Custom apps
     'person',
@@ -55,6 +56,7 @@ INSTALLED_APPS = [
     'capital',
     'expense',
     'account.apps.AccountConfig',
+    'user',
 ]
 
 MIDDLEWARE = [
@@ -129,11 +131,14 @@ CORS_ALLOWED_ORIGINS = [
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'rest_framework_simplejwt.authentication.JWTAuthentication',
+        'rest_framework.authentication.SessionAuthentication',
     ),
-    # <-- ADDED SCHEMA CLASS TO GENERATE OPENAPI 3.0 SCHEMAS
-    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema', 
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
 }
-
+AUTH_USER_MODEL = 'user.User'  # Custom User model
 # --- DRF SPECTACULAR (SWAGGER) SETTINGS ---
 DRF_SPECTACULAR_SETTINGS = {
     'TITLE': 'Heaven Autos API',

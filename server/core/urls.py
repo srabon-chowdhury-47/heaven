@@ -31,6 +31,7 @@ def master_api_root(request):
         "10. Capital API": request.build_absolute_uri('/api/capital/'),
         "11. Expense API": request.build_absolute_uri('/api/expense/'),
         "12. Account API": request.build_absolute_uri('/api/account/'),
+        "13. User API": request.build_absolute_uri('/api/users/'),
         "Interactive Swagger Docs": request.build_absolute_uri('/api/docs/'),  # Added directory link
     })
 
@@ -60,6 +61,7 @@ urlpatterns = [
     path('api/expense/', include('expense.urls')),
     path('api/account/', include('account.urls')),
     path('api/draft-sale/', include('draftSale.urls')),
+    path('api/users/', include('user.urls')),
 
     # --- TOKEN AUTHENTICATION ---
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
