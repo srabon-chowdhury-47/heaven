@@ -1,3 +1,4 @@
+// client/src/components/AdminSidebar.jsx
 import { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import {
@@ -16,7 +17,8 @@ import {
   FiPieChart,
   FiLayers,
   FiCreditCard,
-  FiLogOut
+  FiLogOut,
+  FiUser
 } from "react-icons/fi";
 import logo from "../assets/logo.jpg";
 
@@ -112,6 +114,13 @@ export default function AdminSidebar() {
 
     // --- MASTER MANAGEMENT ---
     { id: "h_master", type: "heading", label: "Master Management" },
+    {
+      id: "users", type: "dropdown", label: "Users", icon: FiUsers, stateKey: "users",
+      subItems: [
+        { to: "/dashboard/users", label: "User Management", icon: FiUser },
+        { to: "/dashboard/users/add", label: "Add New User", icon: FiUserPlus },
+      ]
+    },
     {
       id: "products", type: "dropdown", label: "Products", icon: FiLayers, stateKey: "products",
       subItems: [

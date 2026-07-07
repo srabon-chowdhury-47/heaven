@@ -1,3 +1,4 @@
+// client/src/Route.jsx
 import { createBrowserRouter } from "react-router-dom";
 
 // Layouts
@@ -8,6 +9,10 @@ import AdminLayout from "./layouts/AdminLayout";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
 import Dashboard from "./pages/admin/Dashboard";
+
+// User Management Pages
+import UserManagement from "./pages/admin/users/UserManagement";
+import AddUser from "./pages/admin/users/AddUser";
 
 // Admin Pages
 import EmployeeManage from "./pages/admin/employee/EmployeeList";
@@ -27,7 +32,7 @@ import ViewDraft from './pages/admin/sales/ViewDraft';
 import ViewSale from './pages/admin/sales/ViewSale';
 import Payments from './pages/admin/payment/Payments';
 import PaymentHistory from './pages/admin/payment/PaymentHistory';
-import ViewPaymentdetails from './pages/admin/payment/ViewPaymentdetails'; // <-- ADDED: Imported new view page
+import ViewPaymentdetails from './pages/admin/payment/ViewPaymentdetails';
 import CapitalEntries from './pages/admin/finance/CapitalEntries';
 import ExpenseList from "./pages/admin/finance/ExpenseList";
 import AddExpense from "./pages/admin/finance/AddExpense";
@@ -55,6 +60,10 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <Dashboard /> },
       
+      // User Management Routes - More specific routes FIRST
+      { path: "users/add", element: <AddUser /> },  // This must come BEFORE "users"
+      { path: "users", element: <UserManagement /> },  // This comes AFTER specific routes
+
       // Employee Routes
       { path: "employees", element: <EmployeeManage /> },
       { path: "employees/add", element: <AddEmployee /> },
@@ -85,10 +94,12 @@ export const router = createBrowserRouter([
       { path: "sales/draftlist", element: <DraftSaleList /> },
       { path: "sales/draft/:id/view", element: <ViewDraft /> },
       { path: "sales/view/:id", element: <ViewSale /> },
+      
       // Finance Routes
       { path: "finance/dashboard", element: <FinancialDashboard /> },
       { path: "finance/chart-of-accounts", element: <ChartOfAccounts /> },
       { path: "finance/capital-entries", element: <CapitalEntries /> },
+      
       // Expense Routes
       { path: "finance/expense", element: <ExpenseList /> },
       { path: "finance/expense/add", element: <AddExpense /> },
@@ -100,7 +111,7 @@ export const router = createBrowserRouter([
       // Payment Routes
       { path: "payments", element: <Payments /> },
       { path: "payment-history", element: <PaymentHistory /> },
-      { path: "payments/view/:id", element: <ViewPaymentdetails /> } // <-- ADDED: The new route
+      { path: "payments/view/:id", element: <ViewPaymentdetails /> }
     ],
   },
 ]);
