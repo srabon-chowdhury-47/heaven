@@ -1,12 +1,14 @@
 import uuid
 from django.db import models
 from products.models import Product
-from person.models import Employee, Customer
+from person.models import Customer
 
 class DraftSaleOrder(models.Model):
     invoice_number = models.CharField(max_length=20, unique=True, editable=False)
-    sold_by = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, related_name='draft_sales_made')
-    customer = models.ForeignKey(Customer, on_delete=models.SET_NULL, null=True, blank=True, related_name='draft_purchase_history')
+    sold_by = models.CharField(max_length=100, blank=True, null=True, 
+                               help_text="Name of the person who made the sale")
+    customer = models.ForeignKey(Customer, on_delete=models.SET_NULL, null=True, blank=True, 
+                                 related_name='draft_purchase_history')
     sale_date = models.DateTimeField(auto_now_add=True)
     remarks = models.TextField(blank=True, null=True)
     total_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0.00, editable=False)

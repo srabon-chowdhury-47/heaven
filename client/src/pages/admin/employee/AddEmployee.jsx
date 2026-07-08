@@ -12,6 +12,7 @@ export default function AddEmployee() {
 
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState([]);
+  const [fieldErrors, setFieldErrors] = useState({});
 
   const [formData, setFormData] = useState({
     joining_date: "",
@@ -54,16 +55,103 @@ export default function AddEmployee() {
     }
   }, [isEditMode, editData]);
 
+  // Calculate age from date of birth
+  const calculateAge = (dob) => {
+    if (!dob) return "";
+    
+    const birthDate = new Date(dob);
+    const today = new Date();
+    
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    
+    return age.toString();
+  };
+
   const handleChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    const { name, value } = e.target;
+    
+    // If the field is dob, calculate age automatically
+    if (name === "dob") {
+      const calculatedAge = calculateAge(value);
+      setFormData({ 
+        ...formData, 
+        [name]: value,
+        age: calculatedAge 
+      });
+    } else {
+      setFormData({ ...formData, [name]: value });
+    }
+    
+    // Clear field error when user starts typing
+    if (fieldErrors[name]) {
+      setFieldErrors({ ...fieldErrors, [name]: "" });
+    }
   };
 
   const handleFileChange = (e) => {
     setPicture(e.target.files[0]);
   };
 
+  // Client-side validation
+  const validateForm = () => {
+    const newErrors = {};
+    
+    // Email validation
+    if (!formData.email) {
+      newErrors.email = "Email address is required";
+    } else if (!/\S+@\S+\.\S+/.test(formData.email)) {
+      newErrors.email = "Please enter a valid email address";
+    }
+
+    // Check other required fields
+    const requiredFields = [
+      { field: "full_name", label: "Full Name" },
+      { field: "joining_date", label: "Joining Date" },
+      { field: "father_name", label: "Father's Name" },
+      { field: "mother_name", label: "Mother's Name" },
+      { field: "dob", label: "Date of Birth" },
+      { field: "religion", label: "Religion" },
+      { field: "nid_no", label: "NID No" },
+      { field: "mobile1", label: "Primary Mobile" },
+    ];
+
+    requiredFields.forEach(({ field, label }) => {
+      if (!formData[field]) {
+        newErrors[field] = `${label} is required`;
+      }
+    });
+
+    // Validate age is calculated
+    if (!formData.age || parseInt(formData.age) < 0) {
+      newErrors.dob = "Please select a valid date of birth";
+    }
+
+    setFieldErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
+    
+    // Run client-side validation
+    if (!validateForm()) {
+      // Scroll to the first error
+      const firstErrorField = Object.keys(fieldErrors)[0];
+      if (firstErrorField) {
+        const element = document.getElementsByName(firstErrorField)[0];
+        if (element) {
+          element.focus();
+          element.scrollIntoView({ behavior: "smooth", block: "center" });
+        }
+      }
+      return;
+    }
+
     setLoading(true);
     setErrors([]);
 
@@ -103,12 +191,33 @@ export default function AddEmployee() {
       const errorResponse = err.response?.data;
 
       if (errorResponse && typeof errorResponse === "object" && !Array.isArray(errorResponse)) {
-        const extractedErrors = Object.entries(errorResponse).map(([field, messages]) => {
+        // Handle field-specific errors from Django
+        const extractedErrors = [];
+        const fieldErrorMap = {};
+        
+        Object.entries(errorResponse).forEach(([field, messages]) => {
           const cleanFieldName = field.charAt(0).toUpperCase() + field.slice(1).replace(/_/g, " ");
           const cleanMessage = Array.isArray(messages) ? messages.join(" ") : messages;
-          return `${cleanFieldName}: ${cleanMessage}`;
+          extractedErrors.push(`${cleanFieldName}: ${cleanMessage}`);
+          
+          // Store field-specific errors
+          if (typeof cleanMessage === "string") {
+            fieldErrorMap[field] = cleanMessage;
+          }
         });
+        
         setErrors(extractedErrors);
+        setFieldErrors(fieldErrorMap);
+        
+        // Focus on first field with error
+        const firstErrorField = Object.keys(fieldErrorMap)[0];
+        if (firstErrorField) {
+          const element = document.getElementsByName(firstErrorField)[0];
+          if (element) {
+            element.focus();
+            element.scrollIntoView({ behavior: "smooth", block: "center" });
+          }
+        }
       } else {
         setErrors([
           `Failed to ${isEditMode ? "update" : "add"} employee. Please check your connection or try again.`,
@@ -117,6 +226,36 @@ export default function AddEmployee() {
 
       setLoading(false);
     }
+  };
+
+  // Helper function to render field with error
+  const renderField = (label, name, type = "text", required = false, placeholder = "", readOnly = false) => {
+    const hasError = fieldErrors[name];
+    
+    return (
+      <div>
+        <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
+          {label} {required && <span className="text-red-500">*</span>}
+        </label>
+        <input
+          type={type}
+          name={name}
+          required={required}
+          placeholder={placeholder}
+          value={formData[name]}
+          onChange={handleChange}
+          readOnly={readOnly}
+          className={`w-full bg-white border ${
+            hasError ? "border-red-500" : "border-gray-300"
+          } rounded p-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none ${
+            readOnly ? "bg-gray-100 cursor-not-allowed" : ""
+          }`}
+        />
+        {hasError && (
+          <p className="text-red-500 text-xs mt-0.5">{fieldErrors[name]}</p>
+        )}
+      </div>
+    );
   };
 
   return (
@@ -167,32 +306,8 @@ export default function AddEmployee() {
           <div className="bg-white p-4 rounded-lg border border-gray-300 lg:col-span-1">
             <h2 className="text-sm font-bold text-gray-700 border-b pb-2 mb-3">Core Identity</h2>
             <div className="space-y-3">
-              <div>
-                <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
-                  Full Name *
-                </label>
-                <input
-                  type="text"
-                  name="full_name"
-                  required
-                  value={formData.full_name}
-                  onChange={handleChange}
-                  className="w-full bg-white border border-gray-300 rounded p-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
-                  Joining Date *
-                </label>
-                <input
-                  type="date"
-                  name="joining_date"
-                  required
-                  value={formData.joining_date}
-                  onChange={handleChange}
-                  className="w-full bg-white border border-gray-300 rounded p-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none"
-                />
-              </div>
+              {renderField("Full Name", "full_name", "text", true)}
+              {renderField("Joining Date", "joining_date", "date", true)}
               <div>
                 <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
                   Profile Picture
@@ -241,71 +356,11 @@ export default function AddEmployee() {
           <div className="bg-white p-4 rounded-lg border border-gray-300 lg:col-span-2">
             <h2 className="text-sm font-bold text-gray-700 border-b pb-2 mb-3">Personal & Family Details</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
-                  Father's Name *
-                </label>
-                <input
-                  type="text"
-                  name="father_name"
-                  required
-                  value={formData.father_name}
-                  onChange={handleChange}
-                  className="w-full bg-white border border-gray-300 rounded p-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
-                  Mother's Name *
-                </label>
-                <input
-                  type="text"
-                  name="mother_name"
-                  required
-                  value={formData.mother_name}
-                  onChange={handleChange}
-                  className="w-full bg-white border border-gray-300 rounded p-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
-                  Date of Birth *
-                </label>
-                <input
-                  type="date"
-                  name="dob"
-                  required
-                  value={formData.dob}
-                  onChange={handleChange}
-                  className="w-full bg-white border border-gray-300 rounded p-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
-                  Age *
-                </label>
-                <input
-                  type="number"
-                  name="age"
-                  required
-                  value={formData.age}
-                  onChange={handleChange}
-                  className="w-full bg-white border border-gray-300 rounded p-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
-                  Religion *
-                </label>
-                <input
-                  type="text"
-                  name="religion"
-                  required
-                  value={formData.religion}
-                  onChange={handleChange}
-                  className="w-full bg-white border border-gray-300 rounded p-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none"
-                />
-              </div>
+              {renderField("Father's Name", "father_name", "text", true)}
+              {renderField("Mother's Name", "mother_name", "text", true)}
+              {renderField("Date of Birth", "dob", "date", true)}
+              {renderField("Age", "age", "number", true, "", true)} {/* Age is read-only */}
+              {renderField("Religion", "religion", "text", true)}
               <div>
                 <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
                   Nationality
@@ -327,80 +382,12 @@ export default function AddEmployee() {
           <div className="bg-white p-4 rounded-lg border border-gray-300">
             <h2 className="text-sm font-bold text-gray-700 border-b pb-2 mb-3">Identification & Contact</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
-                  NID No *
-                </label>
-                <input
-                  type="text"
-                  name="nid_no"
-                  required
-                  value={formData.nid_no}
-                  onChange={handleChange}
-                  className="w-full bg-white border border-gray-300 rounded p-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
-                  Birth ID No
-                </label>
-                <input
-                  type="text"
-                  name="birth_id_no"
-                  value={formData.birth_id_no}
-                  onChange={handleChange}
-                  className="w-full bg-white border border-gray-300 rounded p-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
-                  Primary Mobile *
-                </label>
-                <input
-                  type="text"
-                  name="mobile1"
-                  required
-                  value={formData.mobile1}
-                  onChange={handleChange}
-                  className="w-full bg-white border border-gray-300 rounded p-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
-                  Email Address
-                </label>
-                <input
-                  type="email"
-                  name="email"
-                  value={formData.email}
-                  onChange={handleChange}
-                  className="w-full bg-white border border-gray-300 rounded p-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
-                  Father's Mobile
-                </label>
-                <input
-                  type="text"
-                  name="mobile_father"
-                  value={formData.mobile_father}
-                  onChange={handleChange}
-                  className="w-full bg-white border border-gray-300 rounded p-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
-                  Mother's Mobile
-                </label>
-                <input
-                  type="text"
-                  name="mobile_mother"
-                  value={formData.mobile_mother}
-                  onChange={handleChange}
-                  className="w-full bg-white border border-gray-300 rounded p-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none"
-                />
-              </div>
+              {renderField("NID No", "nid_no", "text", true)}
+              {renderField("Birth ID No", "birth_id_no")}
+              {renderField("Primary Mobile", "mobile1", "text", true)}
+              {renderField("Email Address", "email", "email", true)}
+              {renderField("Father's Mobile", "mobile_father")}
+              {renderField("Mother's Mobile", "mobile_mother")}
             </div>
           </div>
 
@@ -410,82 +397,16 @@ export default function AddEmployee() {
               <div className="md:col-span-2">
                 <p className="text-[10px] font-bold text-blue-600 uppercase tracking-wider mb-1">Standard Bank</p>
               </div>
-              <div>
-                <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
-                  Bank Name
-                </label>
-                <input
-                  type="text"
-                  name="bank_name"
-                  value={formData.bank_name}
-                  onChange={handleChange}
-                  className="w-full bg-white border border-gray-300 rounded p-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
-                  Branch Name
-                </label>
-                <input
-                  type="text"
-                  name="branch_name"
-                  value={formData.branch_name}
-                  onChange={handleChange}
-                  className="w-full bg-white border border-gray-300 rounded p-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
-                  Account Name
-                </label>
-                <input
-                  type="text"
-                  name="acc_name"
-                  value={formData.acc_name}
-                  onChange={handleChange}
-                  className="w-full bg-white border border-gray-300 rounded p-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
-                  Account No
-                </label>
-                <input
-                  type="text"
-                  name="acc_no"
-                  value={formData.acc_no}
-                  onChange={handleChange}
-                  className="w-full bg-white border border-gray-300 rounded p-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none"
-                />
-              </div>
+              {renderField("Bank Name", "bank_name")}
+              {renderField("Branch Name", "branch_name")}
+              {renderField("Account Name", "acc_name")}
+              {renderField("Account No", "acc_no")}
 
               <div className="md:col-span-2 mt-1">
                 <p className="text-[10px] font-bold text-purple-600 uppercase tracking-wider mb-1">Mobile Banking</p>
               </div>
-              <div>
-                <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
-                  bKash Number
-                </label>
-                <input
-                  type="text"
-                  name="bkash_no"
-                  value={formData.bkash_no}
-                  onChange={handleChange}
-                  className="w-full bg-white border border-gray-300 rounded p-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
-                  Nagad Number
-                </label>
-                <input
-                  type="text"
-                  name="nagad_no"
-                  value={formData.nagad_no}
-                  onChange={handleChange}
-                  className="w-full bg-white border border-gray-300 rounded p-1.5 text-sm focus:ring-1 focus:ring-blue-500 outline-none"
-                />
-              </div>
+              {renderField("bKash Number", "bkash_no")}
+              {renderField("Nagad Number", "nagad_no")}
             </div>
           </div>
         </div>

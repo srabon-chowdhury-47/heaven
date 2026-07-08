@@ -18,7 +18,8 @@ import {
   FiLayers,
   FiCreditCard,
   FiLogOut,
-  FiUser
+  FiUser,
+  FiUserCheck
 } from "react-icons/fi";
 import logo from "../assets/logo.jpg";
 
@@ -27,8 +28,74 @@ export default function AdminSidebar() {
   const [isSidebarOpen, setIsSidebarOpen] = useState(window.innerWidth >= 1024);
   const [isMobile, setIsMobile] = useState(window.innerWidth < 1024);
   const [touchStartX, setTouchStartX] = useState(0);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
   const location = useLocation();
+
+  // Load current user from localStorage
+  useEffect(() => {
+    const loadUser = () => {
+      try {
+        const userStr = localStorage.getItem('user');
+        console.log('Raw user from localStorage:', userStr); // Debug log
+        
+        if (userStr) {
+          const user = JSON.parse(userStr);
+          console.log('Parsed user object:', user); // Debug log
+          console.log('Username:', user?.username); // Debug log
+          console.log('Full name:', user?.full_name); // Debug log
+          console.log('First name:', user?.first_name); // Debug log
+          console.log('Is superuser:', user?.is_superuser); // Debug log
+          
+          setCurrentUser(user);
+          setIsSuperAdmin(user?.is_superuser === true);
+        } else {
+          // Try to get user from the API if not in localStorage
+          fetchUserFromAPI();
+        }
+      } catch (error) {
+        console.error('Error loading user from localStorage:', error);
+        // Try to get user from the API
+        fetchUserFromAPI();
+      } finally {
+        setLoading(false);
+      }
+    };
+    
+    const fetchUserFromAPI = async () => {
+      try {
+        const token = localStorage.getItem('access_token');
+        if (token) {
+          // Import axios dynamically to avoid circular dependency
+          const { default: axios } = await import('../api/axios');
+          const response = await axios.get('/users/users/me/');
+          const user = response.data;
+          console.log('User from API:', user); // Debug log
+          
+          // Store in localStorage for next time
+          localStorage.setItem('user', JSON.stringify(user));
+          setCurrentUser(user);
+          setIsSuperAdmin(user?.is_superuser === true);
+        }
+      } catch (error) {
+        console.error('Error fetching user from API:', error);
+      }
+    };
+    
+    loadUser();
+    
+    // Listen for storage changes (in case user updates in another tab)
+    const handleStorageChange = (e) => {
+      if (e.key === 'user') {
+        loadUser();
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
 
   // Handle window resize
   useEffect(() => {
@@ -67,6 +134,7 @@ export default function AdminSidebar() {
   const handleLogout = () => {
     localStorage.removeItem("access_token");
     localStorage.removeItem("refresh_token");
+    localStorage.removeItem("user");
     navigate("/");
     setIsSidebarOpen(false);
   };
@@ -82,7 +150,8 @@ export default function AdminSidebar() {
     setIsSidebarOpen(!isSidebarOpen);
   };
 
-  const navItems = [
+  // Base nav items for all users
+  const baseNavItems = [
     { id: 1, type: "link", to: "/dashboard", label: "Dashboard", icon: FiHome },
 
     // --- TRADES ---
@@ -111,7 +180,10 @@ export default function AdminSidebar() {
       ]
     },
     { id: "stock", type: "link", to: "/dashboard/stock", label: "Live Stock", icon: FiBox },
+  ];
 
+  // Admin-only nav items (only visible to super admins)
+  const adminNavItems = [
     // --- MASTER MANAGEMENT ---
     { id: "h_master", type: "heading", label: "Master Management" },
     {
@@ -121,6 +193,24 @@ export default function AdminSidebar() {
         { to: "/dashboard/users/add", label: "Add New User", icon: FiUserPlus },
       ]
     },
+    // --- FINANCE --- (Only for admins)
+    { id: "h_finance", type: "heading", label: "Finance" },
+    {
+      id: "finance", type: "dropdown", label: "Finance & Accounts", icon: FiPieChart, stateKey: "finance",
+      subItems: [
+        { to: "/dashboard/finance/dashboard", label: "Financial Dashboard", icon: FiPieChart },
+        { to: "/dashboard/finance/chart-of-accounts", label: "Chart of Accounts", icon: FiList },
+        { to: "/dashboard/finance/capital-entries", label: "Capital & Investment", icon: FiDollarSign },
+        { to: "/dashboard/finance/expense", label: "Expense Ledger", icon: FiDollarSign },
+        { to: "/dashboard/finance/expense/add", label: "Record New Expense", icon: FiPlus },
+      ]
+    },
+  ];
+
+  // Products & Partners nav items for all users
+  const productsNavItems = [
+    // --- PRODUCTS & PARTNERS ---
+    { id: "h_products", type: "heading", label: "Products & Partners" },
     {
       id: "products", type: "dropdown", label: "Products", icon: FiLayers, stateKey: "products",
       subItems: [
@@ -135,20 +225,10 @@ export default function AdminSidebar() {
         { to: "/dashboard/brands", label: "Brands Master", icon: FiBox },
       ]
     },
+  ];
 
-    // --- FINANCE ---
-    { id: "h_finance", type: "heading", label: "Finance" },
-    {
-      id: "finance", type: "dropdown", label: "Finance & Accounts", icon: FiPieChart, stateKey: "finance",
-      subItems: [
-        { to: "/dashboard/finance/dashboard", label: "Financial Dashboard", icon: FiPieChart },
-        { to: "/dashboard/finance/chart-of-accounts", label: "Chart of Accounts", icon: FiList },
-        { to: "/dashboard/finance/capital-entries", label: "Capital & Investment", icon: FiDollarSign },
-        { to: "/dashboard/finance/expense", label: "Expense Ledger", icon: FiDollarSign },
-        { to: "/dashboard/finance/expense/add", label: "Record New Expense", icon: FiPlus },
-      ]
-    },
-
+  // People management nav items for all users
+  const peopleNavItems = [
     // --- PEOPLE MANAGEMENT ---
     { id: "h_people", type: "heading", label: "People Management" },
     {
@@ -162,6 +242,14 @@ export default function AdminSidebar() {
     },
   ];
 
+  // Combine nav items based on user role
+  const navItems = [
+    ...baseNavItems,
+    ...productsNavItems,
+    ...(isSuperAdmin ? adminNavItems : []),
+    ...peopleNavItems,
+  ];
+
   // Auto-open dropdown if a sub-item is active
   useEffect(() => {
     navItems.forEach((item) => {
@@ -173,6 +261,57 @@ export default function AdminSidebar() {
       }
     });
   }, [location.pathname]);
+
+  // Get user display name - Try multiple possible fields
+  const getDisplayName = () => {
+    if (!currentUser) {
+      // Try to get from localStorage directly if currentUser is null
+      try {
+        const userStr = localStorage.getItem('user');
+        if (userStr) {
+          const user = JSON.parse(userStr);
+          return user.full_name || user.username || user.first_name || 'User';
+        }
+      } catch (e) {}
+      return 'User';
+    }
+    
+    // Try various fields in order of preference
+    if (currentUser.full_name) return currentUser.full_name;
+    if (currentUser.username) return currentUser.username;
+    if (currentUser.first_name) {
+      if (currentUser.last_name) {
+        return `${currentUser.first_name} ${currentUser.last_name}`;
+      }
+      return currentUser.first_name;
+    }
+    if (currentUser.email) return currentUser.email.split('@')[0];
+    if (currentUser.phone) return currentUser.phone;
+    
+    return 'User';
+  };
+
+  // Get user initials for avatar
+  const getInitials = () => {
+    const name = getDisplayName();
+    if (name && name !== 'User') {
+      return name.charAt(0).toUpperCase();
+    }
+    // If no name, try username
+    if (currentUser?.username) {
+      return currentUser.username.charAt(0).toUpperCase();
+    }
+    return 'U';
+  };
+
+  // Loading state
+  if (loading) {
+    return (
+      <div className="fixed inset-y-0 left-0 z-50 w-[220px] bg-gray-900 flex items-center justify-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white"></div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -383,6 +522,42 @@ export default function AdminSidebar() {
           flex: 1;
           min-height: 100vh;
         }
+
+        /* User info styles */
+        .user-info {
+          padding: 8px 12px;
+          margin-bottom: 6px;
+          border-radius: 10px;
+          background: linear-gradient(180deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0.02) 100%);
+          border: 1px solid rgba(255,255,255,0.06);
+        }
+        .user-info .user-name {
+          font-size: 0.8rem;
+          font-weight: 600;
+          color: #e2e8f0;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+        .user-info .user-role {
+          font-size: 0.6rem;
+          color: #94a3b8;
+          text-transform: uppercase;
+          letter-spacing: 0.05em;
+        }
+        .user-info .user-avatar {
+          width: 28px;
+          height: 28px;
+          border-radius: 50%;
+          background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+          font-weight: 600;
+          font-size: 0.7rem;
+          flex-shrink: 0;
+        }
       `}</style>
 
       {/* 3-Bar Hamburger Menu Button - Only visible on mobile/tablet */}
@@ -573,8 +748,23 @@ export default function AdminSidebar() {
           })}
         </nav>
 
-        {/* Footer */}
+        {/* Footer - User Info & Logout */}
         <div className="relative border-t border-white/10 mt-auto p-3 lg:p-2 flex-shrink-0 z-10">
+          {/* User Info - Display current user */}
+          <div className="user-info flex items-center gap-3 mb-2">
+            <div className="user-avatar">
+              {getInitials()}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="user-name">{getDisplayName()}</div>
+              <div className="user-role flex items-center gap-1">
+                <FiUserCheck size={10} />
+                {isSuperAdmin ? 'Super Admin' : 'User'}
+              </div>
+            </div>
+          </div>
+
+          {/* Logout Button */}
           <button
             onClick={handleLogout}
             className="logout-btn glass-btn glass-btn-danger group flex items-center justify-center gap-2 w-full p-3 lg:p-2 text-red-200 rounded-2xl lg:rounded-xl font-semibold text-sm lg:text-xs hover:text-white

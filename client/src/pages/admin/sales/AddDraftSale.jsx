@@ -30,6 +30,8 @@ export default function AddDraftSale() {
   const [customers, setCustomers] = useState([]);
   const [brands, setBrands] = useState([]);
   const [stocks, setStocks] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [currentUser, setCurrentUser] = useState(null);
 
   // --- UI TOGGLE STATE ---
   const [entryMode, setEntryMode] = useState("manual");
@@ -83,12 +85,13 @@ export default function AddDraftSale() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [prodRes, empRes, custRes, brandRes, stockRes] = await Promise.all([
+        const [prodRes, empRes, custRes, brandRes, stockRes, usersRes] = await Promise.all([
           axiosInstance.get("products/"),
           axiosInstance.get("person/employees/"),
           axiosInstance.get("person/customers/"),
           axiosInstance.get("brand/brands/"),
           axiosInstance.get("stock/stocks/"),
+          axiosInstance.get("users/users/"),
         ]);
 
         setProducts(prodRes.data.results || prodRes.data);
@@ -96,6 +99,38 @@ export default function AddDraftSale() {
         setCustomers(custRes.data.results || custRes.data);
         setBrands(brandRes.data.results || brandRes.data);
         setStocks(stockRes.data.results || stockRes.data);
+        setUsers(usersRes.data || []);
+
+        // Get current user - you can modify this based on your auth system
+        // Option 1: Get from localStorage
+        const storedUser = localStorage.getItem('user');
+        if (storedUser) {
+          try {
+            const parsedUser = JSON.parse(storedUser);
+            const user = usersRes.data?.find(u => u.id === parsedUser.id);
+            if (user) {
+              setCurrentUser(user);
+              setOrderData(prev => ({
+                ...prev,
+                sold_by: user.id
+              }));
+            }
+          } catch (e) {
+            console.error("Error parsing stored user", e);
+          }
+        }
+        
+        // Option 2: Get from session or token
+        // If no user found in localStorage, try to get from the first user or your auth context
+        if (!currentUser && usersRes.data && usersRes.data.length > 0) {
+          // You might want to filter active users or get the currently logged in user
+          const firstUser = usersRes.data[0];
+          setCurrentUser(firstUser);
+          setOrderData(prev => ({
+            ...prev,
+            sold_by: firstUser.id
+          }));
+        }
       } catch (err) {
         console.error("Failed to fetch data", err);
         setError("Warning: Could not load initial data. Check server connection.");
@@ -115,7 +150,7 @@ export default function AddDraftSale() {
 
         setOrderData({
           customer: draft.customer || "",
-          sold_by: draft.sold_by || null,
+          sold_by: draft.sold_by || (currentUser ? currentUser.id : null),
           payment_status: draft.payment_status || "Unpaid",
           remarks: draft.remarks || "",
         });
@@ -145,7 +180,6 @@ export default function AddDraftSale() {
             const searchText = partNumber ? `${partNumber} - ${productName}` : productName;
             const purchasePrice = product?.purchase_cost_bdt || 0;
             
-            // Get multiplier from the item data or calculate it
             let multiplier = item.multiplier || "";
             if (!multiplier && purchasePrice > 0 && parseFloat(item.unit_price_bdt) > 0) {
               const salePrice = parseFloat(item.unit_price_bdt);
@@ -163,7 +197,6 @@ export default function AddDraftSale() {
             };
           });
           setManualItems(items);
-          // Add empty row at the end
           setManualItems((prev) => [...prev, { 
             product: "", 
             purchase_price_bdt: "", 
@@ -184,7 +217,7 @@ export default function AddDraftSale() {
     };
 
     fetchDraft();
-  }, [id, isEditing, products]);
+  }, [id, isEditing, products, currentUser]);
 
   // --- Debounced customer search ---
   useEffect(() => {
@@ -314,7 +347,6 @@ export default function AddDraftSale() {
         newItems[index].search = partNum ? `${partNum} - ${name}` : name;
         newItems[index].showDropdown = false;
       }
-      // Add new empty row if this is the last row
       if (index === newItems.length - 1) {
         newItems.push({ 
           product: "", 
@@ -328,17 +360,14 @@ export default function AddDraftSale() {
       }
     } else if (field === "multiplier") {
       newItems[index].multiplier = value;
-      // Auto-calculate sale price from purchase price and multiplier
       const salePrice = calculateSalePrice(newItems[index].purchase_price_bdt, value);
       newItems[index].unit_price_bdt = salePrice;
     } else if (field === "unit_price_bdt") {
       newItems[index].unit_price_bdt = value;
-      // Auto-calculate multiplier from purchase price and sale price
       const multiplier = calculateMultiplier(newItems[index].purchase_price_bdt, value);
       newItems[index].multiplier = multiplier;
     } else if (field === "purchase_price_bdt") {
       newItems[index].purchase_price_bdt = value;
-      // Recalculate sale price if multiplier exists
       if (newItems[index].multiplier) {
         const salePrice = calculateSalePrice(value, newItems[index].multiplier);
         newItems[index].unit_price_bdt = salePrice;
@@ -539,14 +568,14 @@ export default function AddDraftSale() {
 
     const payload = {
       customer: orderData.customer ? parseInt(orderData.customer) : null,
-      sold_by: null,
+      sold_by: orderData.sold_by,
       payment_status: "Unpaid",
       remarks: orderData.remarks || "",
       items: itemsToSubmit.map((item) => ({
         product: item.product,
         quantity: parseInt(item.quantity, 10),
         unit_price_bdt: parseFloat(item.unit_price_bdt).toFixed(2),
-        multiplier: item.multiplier ? parseFloat(item.multiplier).toFixed(2) : null, // Include multiplier in payload
+        multiplier: item.multiplier ? parseFloat(item.multiplier).toFixed(2) : null,
       })),
     };
 
@@ -601,8 +630,8 @@ export default function AddDraftSale() {
       )}
 
       <form onSubmit={handleSubmit} className="bg-white border border-gray-300 overflow-hidden">
-        {/* --- ORDER HEADER (Customer + Remarks) --- */}
-        <div className="p-2 bg-gray-50 border-b border-gray-300 grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {/* --- ORDER HEADER (Customer + Sold By + Remarks) --- */}
+        <div className="p-2 bg-gray-50 border-b border-gray-300 grid grid-cols-1 md:grid-cols-3 gap-2">
           {/* Customer combobox with always-visible Add New button */}
           <div ref={customerDropdownRef} className="relative">
             <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider">
@@ -667,7 +696,6 @@ export default function AddDraftSale() {
                   </div>
                 )}
               </div>
-              {/* Always-visible Add New Customer button */}
               <button
                 type="button"
                 onClick={() => {
@@ -686,6 +714,26 @@ export default function AddDraftSale() {
             )}
           </div>
 
+          {/* Sold By - Auto-filled with current user */}
+          <div>
+            <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider">
+              Sold By
+            </label>
+            <div className="w-full bg-gray-100 border border-gray-300 rounded p-1 text-sm text-gray-800">
+              {currentUser ? (
+                <span>{currentUser.full_name || currentUser.username}</span>
+              ) : (
+                <span className="text-gray-400">Loading user...</span>
+              )}
+            </div>
+            {currentUser && (
+              <div className="mt-0.5 text-[9px] text-gray-400">
+                ID: {currentUser.id}
+              </div>
+            )}
+          </div>
+
+          {/* Remarks */}
           <div>
             <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider">
               Remarks
