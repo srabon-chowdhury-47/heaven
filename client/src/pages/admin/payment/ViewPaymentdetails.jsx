@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import axiosInstance from "../../../api/axios";
+import { userService } from "../../../api/user";
 import {
   FiArrowLeft,
   FiFileText,
@@ -21,6 +22,7 @@ export default function ViewPaymentdetails() {
   const [payment, setPayment] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [users, setUsers] = useState([]);
 
   const [orderItems, setOrderItems] = useState([]);
   const [orderLoading, setOrderLoading] = useState(false);
@@ -34,6 +36,10 @@ export default function ViewPaymentdetails() {
       const res = await axiosInstance.get(`payment/payments/${id}/`);
       setPayment(res.data);
       fetchOrderItems(res.data);
+      
+      // Fetch users for getting user details
+      const usersRes = await axiosInstance.get("users/users/");
+      setUsers(usersRes.data || []);
     } catch (err) {
       console.error(err);
       setError("Failed to load payment details.");
@@ -69,7 +75,17 @@ export default function ViewPaymentdetails() {
     }
   };
 
-  // --- PRINT FUNCTION (updated CSS for solid white headings) ---
+  // Get user name by ID
+  const getUserName = (userId) => {
+    if (!userId) return "Unknown";
+    const user = users.find((u) => String(u.id) === String(userId));
+    if (user) {
+      return user.full_name || user.username || user.first_name || `User #${user.id}`;
+    }
+    return "Unknown";
+  };
+
+  // --- PRINT FUNCTION ---
   const handlePrint = () => {
     if (!payment) return;
 
@@ -79,6 +95,9 @@ export default function ViewPaymentdetails() {
       (sum, item) => sum + parseFloat(item.total_price_bdt || item.total_cost_bdt || 0),
       0
     );
+
+    // Get user name for print
+    const handledByName = payment.handled_by ? getUserName(payment.handled_by) : "—";
 
     let productRows = "";
     orderItems.forEach((item, index) => {
@@ -292,7 +311,7 @@ export default function ViewPaymentdetails() {
             </div>
             <div class="item">
               <span class="label">Processed By</span>
-              <span class="value">${payment.handled_by_name || "—"}</span>
+              <span class="value">${handledByName}</span>
             </div>
           </div>
 
@@ -543,17 +562,22 @@ export default function ViewPaymentdetails() {
 
         {/* Processed By & Remarks */}
         <div className="p-3 border-b border-gray-300 grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {payment.handled_by_name && (
-            <div className="flex items-start gap-2">
-              <FiUser className="text-gray-500 text-lg mt-0.5" />
-              <div>
-                <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
-                  Processed By
-                </p>
-                <p className="font-medium">{payment.handled_by_name}</p>
-              </div>
+          <div className="flex items-start gap-2">
+            <FiUser className="text-gray-500 text-lg mt-0.5" />
+            <div>
+              <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
+                Processed By
+              </p>
+              <p className="font-medium text-gray-800">
+                {payment.handled_by ? getUserName(payment.handled_by) : "—"}
+              </p>
+              {payment.handled_by && (
+                <div className="text-[9px] text-gray-400">
+                  ID: {payment.handled_by}
+                </div>
+              )}
             </div>
-          )}
+          </div>
           {payment.remarks && (
             <div className="flex items-start gap-2">
               <FiMessageSquare className="text-gray-500 text-lg mt-0.5" />

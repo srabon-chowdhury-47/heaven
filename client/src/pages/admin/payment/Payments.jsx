@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import axiosInstance from "../../../api/axios";
+import { userService } from "../../../api/user";
 import {
   FiDollarSign,
   FiArrowDownLeft,
@@ -18,6 +19,8 @@ export default function Payments() {
   const [type, setType] = useState("IN");
   const [orders, setOrders] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [currentUser, setCurrentUser] = useState(null);
   const [recentPayments, setRecentPayments] = useState([]);
 
   const [selectedOrderId, setSelectedOrderId] = useState("");
@@ -52,26 +55,53 @@ export default function Payments() {
 
   useEffect(() => {
     fetchEmployees();
+    fetchUsers();
     fetchRecentPayments();
+    loadCurrentUser();
   }, []);
 
-  useEffect(() => {
-    fetchOrders();
-    setSelectedOrderId("");
-    setActiveOrder(null);
-    setOrderSummary({ total: 0, paid: 0, due: 0 });
-    setFormData((prev) => ({ ...initialFormState, payment_method: prev.payment_method }));
-  }, [type]);
+  // Load current user from localStorage or API
+  const loadCurrentUser = async () => {
+    try {
+      // First try to get from localStorage using userService
+      const storedUser = userService.getCurrentUserFromStorage();
+      if (storedUser && storedUser.id) {
+        setCurrentUser(storedUser);
+        setFormData((prev) => ({
+          ...prev,
+          handled_by: storedUser.id.toString()
+        }));
+        return;
+      }
 
-  useEffect(() => {
-    if (selectedOrderId) {
-      calculateDue(selectedOrderId);
-      const order = orders.find((o) => o.id.toString() === selectedOrderId.toString());
-      setActiveOrder(order || null);
-    } else {
-      setActiveOrder(null);
+      // If not in localStorage, try to fetch from API
+      try {
+        const user = await userService.getCurrentUser();
+        if (user && user.id) {
+          setCurrentUser(user);
+          setFormData((prev) => ({
+            ...prev,
+            handled_by: user.id.toString()
+          }));
+          // Store in localStorage for future use
+          localStorage.setItem('user', JSON.stringify(user));
+        }
+      } catch (err) {
+        console.error("Failed to fetch current user from API", err);
+        // Fallback: try to get from users list if available
+        if (users.length > 0) {
+          const firstUser = users[0];
+          setCurrentUser(firstUser);
+          setFormData((prev) => ({
+            ...prev,
+            handled_by: firstUser.id.toString()
+          }));
+        }
+      }
+    } catch (err) {
+      console.error("Error loading current user:", err);
     }
-  }, [selectedOrderId, recentPayments, orders]);
+  };
 
   const fetchEmployees = async () => {
     try {
@@ -79,6 +109,32 @@ export default function Payments() {
       setEmployees(res.data.results || res.data);
     } catch (err) {
       console.error("Failed to fetch employees", err);
+    }
+  };
+
+  const fetchUsers = async () => {
+    try {
+      const res = await axiosInstance.get("users/users/");
+      const usersData = res.data || [];
+      setUsers(usersData);
+
+      // If current user is not set yet and we have users, try to find the current user
+      if (!currentUser && usersData.length > 0) {
+        const storedUser = userService.getCurrentUserFromStorage();
+        if (storedUser && storedUser.id) {
+          const user = usersData.find((u) => u.id === storedUser.id);
+          if (user) {
+            setCurrentUser(user);
+            setFormData((prev) => ({
+              ...prev,
+              handled_by: user.id.toString()
+            }));
+            return;
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Failed to fetch users", err);
     }
   };
 
@@ -105,6 +161,29 @@ export default function Payments() {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    fetchOrders();
+    setSelectedOrderId("");
+    setActiveOrder(null);
+    setOrderSummary({ total: 0, paid: 0, due: 0 });
+    // Keep the handled_by value when changing type
+    setFormData((prev) => ({ 
+      ...initialFormState, 
+      handled_by: prev.handled_by,
+      payment_method: prev.payment_method 
+    }));
+  }, [type]);
+
+  useEffect(() => {
+    if (selectedOrderId) {
+      calculateDue(selectedOrderId);
+      const order = orders.find((o) => o.id.toString() === selectedOrderId.toString());
+      setActiveOrder(order || null);
+    } else {
+      setActiveOrder(null);
+    }
+  }, [selectedOrderId, recentPayments, orders]);
 
   const calculateDue = (orderId) => {
     const order = orders.find((o) => o.id.toString() === orderId.toString());
@@ -156,7 +235,10 @@ export default function Payments() {
       await fetchOrders();
 
       setSelectedOrderId("");
-      setFormData(initialFormState);
+      setFormData((prev) => ({ 
+        ...initialFormState, 
+        handled_by: prev.handled_by // Keep the user selected
+      }));
       alert("Payment recorded successfully!");
     } catch (err) {
       console.error("Payment failed", err);
@@ -164,6 +246,21 @@ export default function Payments() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  // Get user name by ID
+  const getUserName = (userId) => {
+    if (!userId) return "Unknown";
+    const user = users.find((u) => String(u.id) === String(userId));
+    if (user) {
+      return user.full_name || user.username || user.first_name || `User #${user.id}`;
+    }
+    // Fallback to employees if not found in users
+    const emp = employees.find((e) => String(e.id) === String(userId));
+    if (emp) {
+      return emp.full_name || emp.name || emp.first_name || `Employee #${emp.id}`;
+    }
+    return "Unknown";
   };
 
   // Fetch order details when viewing payment
@@ -425,21 +522,20 @@ export default function Payments() {
 
               <div>
                 <label className="block text-[11px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
-                  Processed By
+                  Processed By (Auto)
                 </label>
-                <select
-                  name="handled_by"
-                  value={formData.handled_by}
-                  onChange={handleInputChange}
-                  className="w-full bg-white border border-gray-300 rounded p-1.5 text-sm text-gray-800 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
-                >
-                  <option value="">— Select Employee —</option>
-                  {employees.map((emp) => (
-                    <option key={emp.id} value={emp.id}>
-                      {emp.full_name}
-                    </option>
-                  ))}
-                </select>
+                <div className="w-full bg-gray-100 border border-gray-300 rounded p-1.5 text-sm text-gray-800">
+                  {currentUser ? (
+                    <span>{currentUser.full_name || currentUser.username || currentUser.first_name || "User"}</span>
+                  ) : (
+                    <span className="text-gray-400">Loading user...</span>
+                  )}
+                </div>
+                {currentUser && (
+                  <div className="mt-0.5 text-[9px] text-gray-400">
+                    ID: {currentUser.id} • {currentUser.email || "No email"}
+                  </div>
+                )}
               </div>
 
               <div>
@@ -494,6 +590,9 @@ export default function Payments() {
                   <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider">
                     Method
                   </th>
+                  <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider">
+                    Processed By
+                  </th>
                   <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-right">
                     Amount
                   </th>
@@ -505,7 +604,7 @@ export default function Payments() {
               <tbody>
                 {recentPayments.length === 0 ? (
                   <tr>
-                    <td colSpan="6" className="border border-gray-300 px-3 py-6 text-center text-gray-400 text-sm">
+                    <td colSpan="7" className="border border-gray-300 px-3 py-6 text-center text-gray-400 text-sm">
                       No recent transactions.
                     </td>
                   </tr>
@@ -544,6 +643,9 @@ export default function Payments() {
                       </td>
                       <td className="border border-gray-300 px-2 py-1.5 font-semibold text-gray-800 text-xs">
                         {pay.payment_method}
+                      </td>
+                      <td className="border border-gray-300 px-2 py-1.5 text-xs text-gray-800">
+                        {pay.handled_by ? getUserName(pay.handled_by) : "—"}
                       </td>
                       <td
                         className={`border border-gray-300 px-2 py-1.5 text-right font-black ${
@@ -747,7 +849,9 @@ export default function Payments() {
               <div>
                 <p className="text-[10px] text-gray-500 uppercase font-semibold">Processed By</p>
                 <p className="font-medium text-gray-800">
-                  {selectedPaymentDetails.handled_by_name || "Unknown"}
+                  {selectedPaymentDetails.handled_by 
+                    ? getUserName(selectedPaymentDetails.handled_by)
+                    : "Unknown"}
                 </p>
               </div>
 

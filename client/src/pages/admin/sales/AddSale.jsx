@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import axiosInstance from "../../../api/axios";
+import { userService } from "../../../api/user";
 import {
   FiPlus,
   FiTrash2,
@@ -85,6 +86,54 @@ export default function AddSale() {
   // Refs for dropdown outside click handling
   const dropdownRefs = useRef({});
 
+  // --- Load Current User ---
+  const loadCurrentUser = async (usersData) => {
+    try {
+      // First try to get from localStorage using userService
+      const storedUser = userService.getCurrentUserFromStorage();
+      if (storedUser && storedUser.id) {
+        const user = usersData?.find(u => u.id === storedUser.id);
+        if (user) {
+          setCurrentUser(user);
+          setOrderData(prev => ({
+            ...prev,
+            sold_by: user.id
+          }));
+          return;
+        }
+      }
+
+      // If not in localStorage, try to fetch from API
+      try {
+        const user = await userService.getCurrentUser();
+        if (user && user.id) {
+          setCurrentUser(user);
+          setOrderData(prev => ({
+            ...prev,
+            sold_by: user.id
+          }));
+          // Store in localStorage for future use
+          localStorage.setItem('user', JSON.stringify(user));
+          return;
+        }
+      } catch (err) {
+        console.error("Failed to fetch current user from API", err);
+      }
+
+      // Fallback: try to get from users list
+      if (usersData && usersData.length > 0) {
+        const firstUser = usersData[0];
+        setCurrentUser(firstUser);
+        setOrderData(prev => ({
+          ...prev,
+          sold_by: firstUser.id
+        }));
+      }
+    } catch (err) {
+      console.error("Error loading current user:", err);
+    }
+  };
+
   // --- FETCH DATA ---
   useEffect(() => {
     const fetchData = async () => {
@@ -105,33 +154,8 @@ export default function AddSale() {
         setStocks(stockRes.data.results || stockRes.data);
         setUsers(usersRes.data || []);
 
-        // Get current user
-        const storedUser = localStorage.getItem('user');
-        if (storedUser) {
-          try {
-            const parsedUser = JSON.parse(storedUser);
-            const user = usersRes.data?.find(u => u.id === parsedUser.id);
-            if (user) {
-              setCurrentUser(user);
-              setOrderData(prev => ({
-                ...prev,
-                sold_by: user.id
-              }));
-            }
-          } catch (e) {
-            console.error("Error parsing stored user", e);
-          }
-        }
-        
-        // If no user found in localStorage, try to get from the first user
-        if (!currentUser && usersRes.data && usersRes.data.length > 0) {
-          const firstUser = usersRes.data[0];
-          setCurrentUser(firstUser);
-          setOrderData(prev => ({
-            ...prev,
-            sold_by: firstUser.id
-          }));
-        }
+        // Load current user
+        await loadCurrentUser(usersRes.data);
       } catch (err) {
         console.error("Failed to fetch data", err);
         setError("Warning: Could not load initial data. Check server connection.");
@@ -726,14 +750,14 @@ export default function AddSale() {
             </label>
             <div className="w-full bg-gray-100 border border-gray-300 rounded p-1 text-sm text-gray-800">
               {currentUser ? (
-                <span>{currentUser.full_name || currentUser.username}</span>
+                <span>{currentUser.full_name || currentUser.username || currentUser.first_name || "User"}</span>
               ) : (
                 <span className="text-gray-400">Loading user...</span>
               )}
             </div>
             {currentUser && (
               <div className="mt-0.5 text-[9px] text-gray-400">
-                ID: {currentUser.id}
+                ID: {currentUser.id} • {currentUser.email || "No email"}
               </div>
             )}
           </div>
