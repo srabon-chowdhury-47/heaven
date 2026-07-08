@@ -79,6 +79,7 @@ export default function ViewSale() {
   const [brands, setBrands] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [printing, setPrinting] = useState(false);
@@ -90,12 +91,13 @@ export default function ViewSale() {
   const fetchSaleData = async () => {
     try {
       setLoading(true);
-      const [saleRes, prodRes, brandRes, custRes, empRes] = await Promise.all([
+      const [saleRes, prodRes, brandRes, custRes, empRes, usersRes] = await Promise.all([
         axiosInstance.get(`sale/sales/${id}/`),
         axiosInstance.get("products/"),
         axiosInstance.get("brand/brands/"),
         axiosInstance.get("person/customers/"),
         axiosInstance.get("person/employees/"),
+        axiosInstance.get("users/users/"),
       ]);
 
       setSale(saleRes.data);
@@ -103,6 +105,7 @@ export default function ViewSale() {
       setBrands(brandRes.data.results || brandRes.data);
       setCustomers(custRes.data.results || custRes.data);
       setEmployees(empRes.data.results || empRes.data);
+      setUsers(usersRes.data || []);
       setError("");
     } catch (err) {
       console.error(err);
@@ -124,8 +127,28 @@ export default function ViewSale() {
     return customers.find((c) => String(c.id) === String(id));
   };
 
+  const getCustomerAddress = (customer) => {
+    if (!customer) return "N/A";
+    const parts = [];
+    if (customer.town_village) parts.push(customer.town_village);
+    if (customer.district) parts.push(customer.district);
+    if (customer.division) parts.push(customer.division);
+    return parts.length > 0 ? parts.join(", ") : "N/A";
+  };
+
+  const getCustomerPhone = (customer) => {
+    if (!customer) return "N/A";
+    return customer.mobile1 || customer.phone || "N/A";
+  };
+
   const getEmployeeName = (id) => {
     if (!id) return "Unknown";
+    
+    const user = users.find((u) => String(u.id) === String(id));
+    if (user) {
+      return user.full_name || user.username || `User #${user.id}`;
+    }
+    
     const emp = employees.find((e) => String(e.id) === String(id));
     if (!emp) return "Unknown";
     return emp.first_name
@@ -148,7 +171,6 @@ export default function ViewSale() {
     if (!item) return "N/A";
     const product = getProductDetails(item.product);
     if (!product) return "N/A";
-    // Find brand by ID
     const brand = brands.find((b) => String(b.id) === String(product.brand));
     return brand?.name || "N/A";
   };
@@ -206,13 +228,6 @@ export default function ViewSale() {
     const discount = parseFloat(sale.discount_amount || 0);
     const total = subtotal - discount;
     return { subtotal, discount, total };
-  };
-
-  // Calculate percentage difference
-  const calculatePercentage = (mrp, price) => {
-    if (!mrp || mrp === 0) return null;
-    const diff = ((mrp - price) / mrp) * 100;
-    return diff.toFixed(1);
   };
 
   // Get multiplier display
@@ -361,15 +376,14 @@ export default function ViewSale() {
                 font-size: 10px;
               }
               .col-sl { width: 4%; text-align: center; }
-              .col-part-no { width: 11%; text-align: center; }
-              .col-brand { width: 8%; text-align: center; }
-              .col-part-name { width: 22%; text-align: center; }
+              .col-part-no { width: 12%; text-align: center; }
+              .col-brand { width: 9%; text-align: center; }
+              .col-part-name { width: 24%; text-align: center; }
               .col-multiplier { width: 7%; text-align: center; }
               .col-qty { width: 6%; text-align: center; }
               .col-mrp { width: 10%; text-align: center; }
-              .col-percent { width: 6%; text-align: center; }
-              .col-price { width: 11%; text-align: center; }
-              .col-total { width: 11%; text-align: center; }
+              .col-price { width: 13%; text-align: center; }
+              .col-total { width: 15%; text-align: center; }
               td.num { text-align: right; }
               td.ctr { text-align: center; }
               td.part-no { text-align: left; }
@@ -459,11 +473,11 @@ export default function ViewSale() {
                 </tr>
                 <tr>
                   <td class="label">Address:</td>
-                  <td colspan="3">${customer?.address || "N/A"}</td>
+                  <td colspan="3">${customer ? getCustomerAddress(customer) : "N/A"}</td>
                 </tr>
                 <tr>
                   <td class="label">Phone:</td>
-                  <td colspan="3">${customer?.phone || "N/A"}</td>
+                  <td colspan="3">${customer ? getCustomerPhone(customer) : "N/A"}</td>
                 </tr>
                 <tr>
                   <td class="label">Email:</td>
@@ -482,10 +496,9 @@ export default function ViewSale() {
                     <th class="col-part-no">Part no.</th>
                     <th class="col-brand">Brand</th>
                     <th class="col-part-name">Product name</th>
-                    <th class="col-multiplier">×</th>
+                    <th class="col-multiplier">× (Multiplier)</th>
                     <th class="col-qty">Qty</th>
                     <th class="col-mrp">Mrp (inr)</th>
-                    <th class="col-percent">%</th>
                     <th class="col-price">Price</th>
                     <th class="col-total">Total</th>
                   </tr>
@@ -494,7 +507,6 @@ export default function ViewSale() {
                   ${sale?.items?.map((item, index) => {
                     const mrp = parseFloat(item.mrp_inr || 0);
                     const price = parseFloat(item.unit_price_bdt || 0);
-                    const percentage = calculatePercentage(mrp, price);
                     const multiplier = getMultiplierDisplay(item);
                     const brandName = getProductBrand(item);
                     const productName = getProductName(item);
@@ -510,39 +522,38 @@ export default function ViewSale() {
                     <td class="ctr" style="font-size:11px;">${multiplier}</td>
                     <td class="ctr">${item.quantity}</td>
                     <td class="num">${mrp ? formatNumber(mrp) : "—"}</td>
-                    <td class="ctr">${percentage ? percentage + "%" : "—"}</td>
                     <td class="num">${formatNumber(price)}</td>
                     <td class="num">${formatNumber(item.total_price_bdt)}</td>
                   </tr>
                   `;
-                  }).join("") || '<tr><td colspan="10" style="text-align:center;">No items found</td></tr>'}
+                  }).join("") || '<tr><td colspan="9" style="text-align:center;">No items found</td></tr>'}
                   <tr>
                     <td colspan="7" rowspan="${totals.discount > 0 ? 6 : 5}" class="words-cell" style="vertical-align:bottom; padding: 8px;">
                       <b>Amount In Words:</b> BDT ${numberToWords(totals.total)} Only
                     </td>
-                    <td colspan="2" class="totals-label">Total</td>
+                    <td colspan="1" class="totals-label">Total</td>
                     <td class="num" style="font-weight:normal;">${formatNumber(totals.subtotal)}</td>
                   </tr>
                   ${totals.discount > 0 ? `
                   <tr>
-                    <td colspan="2" class="totals-label">Less/Add.</td>
+                    <td colspan="1" class="totals-label">Less/Add.</td>
                     <td class="num" style="font-weight:normal;">${formatNumber(totals.discount)}</td>
                   </tr>
                   ` : ""}
                   <tr>
-                    <td colspan="2" class="totals-label">Grand Total</td>
+                    <td colspan="1" class="totals-label">Grand Total</td>
                     <td class="num" style="font-weight:normal;">${formatNumber(totals.total)}</td>
                   </tr>
                   <tr>
-                    <td colspan="2" class="balance-label">Previous Balance</td>
+                    <td colspan="1" class="balance-label">Prev. Balance</td>
                     <td class="num balance-value" style="font-weight:normal;">${formatNumber(previousBalance)}</td>
                   </tr>
                   <tr>
-                    <td colspan="2" class="balance-label">Paid</td>
+                    <td colspan="1" class="balance-label">Paid</td>
                     <td class="num balance-value" style="font-weight:normal;">${formatNumber(paid)}</td>
                   </tr>
                   <tr>
-                    <td colspan="2" class="balance-label">Current Balance</td>
+                    <td colspan="1" class="balance-label">Curr. Balance</td>
                     <td class="num balance-value" style="font-weight:normal;">
                       ${formatNumber(currentBalance)}
                     </td>
@@ -670,11 +681,11 @@ export default function ViewSale() {
               </tr>
               <tr>
                 <td className="font-semibold w-24 py-1">Address:</td>
-                <td className="py-1">{customer?.address || "N/A"}</td>
+                <td className="py-1">{customer ? getCustomerAddress(customer) : "N/A"}</td>
               </tr>
               <tr>
                 <td className="font-semibold w-24 py-1">Phone:</td>
-                <td className="py-1">{customer?.phone || "N/A"}</td>
+                <td className="py-1">{customer ? getCustomerPhone(customer) : "N/A"}</td>
               </tr>
               <tr>
                 <td className="font-semibold w-24 py-1">Email:</td>
@@ -774,7 +785,7 @@ export default function ViewSale() {
         </div>
       </div>
 
-      {/* Products Table */}
+      {/* Products Table - Updated column structure */}
       <div className="bg-white border border-gray-300 overflow-hidden mb-4">
         <div className="border-b border-gray-300 px-3 py-2 bg-gray-50 flex justify-between items-center">
           <h3 className="text-xs font-bold text-gray-600 uppercase tracking-wider flex items-center gap-2">
@@ -801,16 +812,13 @@ export default function ViewSale() {
                   Product name
                 </th>
                 <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
-                  ×
+                  × (Multiplier)
                 </th>
                 <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
                   Qty
                 </th>
                 <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
                   Mrp (inr)
-                </th>
-                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
-                  %
                 </th>
                 <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
                   Price
@@ -831,7 +839,6 @@ export default function ViewSale() {
                   const productName = getProductName(item);
                   const mrp = parseFloat(item.mrp_inr || 0);
                   const price = parseFloat(item.unit_price_bdt || 0);
-                  const percentage = calculatePercentage(mrp, price);
                   const multiplier = getMultiplierDisplay(item);
                   return (
                     <tr key={idx} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
@@ -863,9 +870,6 @@ export default function ViewSale() {
                       <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-xs">
                         {mrp ? formatCurrency(mrp) : "—"}
                       </td>
-                      <td className="border border-gray-300 px-2 py-1.5 text-center text-xs font-semibold">
-                        {percentage ? percentage + "%" : "—"}
-                      </td>
                       <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-xs">
                         {formatCurrency(item.unit_price_bdt)}
                       </td>
@@ -880,7 +884,7 @@ export default function ViewSale() {
                 })
               ) : (
                 <tr>
-                  <td colSpan="11" className="border border-gray-300 px-3 py-6 text-center text-gray-400 text-sm">
+                  <td colSpan="10" className="border border-gray-300 px-3 py-6 text-center text-gray-400 text-sm">
                     No products in this sale.
                   </td>
                 </tr>
@@ -888,7 +892,7 @@ export default function ViewSale() {
             </tbody>
             <tfoot>
               <tr className="bg-gray-50 font-bold">
-                <td colSpan="9" className="border border-gray-300 px-2 py-1.5 text-right text-xs uppercase text-gray-600">
+                <td colSpan="8" className="border border-gray-300 px-2 py-1.5 text-right text-xs uppercase text-gray-600">
                   Subtotal
                 </td>
                 <td className="border border-gray-300 px-2 py-1.5 text-right font-mono">
@@ -898,7 +902,7 @@ export default function ViewSale() {
               </tr>
               {totals.discount > 0 && (
                 <tr className="bg-gray-50">
-                  <td colSpan="9" className="border border-gray-300 px-2 py-1.5 text-right text-xs uppercase text-red-600">
+                  <td colSpan="8" className="border border-gray-300 px-2 py-1.5 text-right text-xs uppercase text-red-600">
                     Discount
                   </td>
                   <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-red-600">
@@ -908,7 +912,7 @@ export default function ViewSale() {
                 </tr>
               )}
               <tr className="bg-green-50">
-                <td colSpan="9" className="border border-gray-300 px-2 py-1.5 text-right text-sm uppercase text-green-700">
+                <td colSpan="8" className="border border-gray-300 px-2 py-1.5 text-right text-sm uppercase text-green-700">
                   Grand Total
                 </td>
                 <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-base text-green-700">
@@ -917,7 +921,7 @@ export default function ViewSale() {
                 <td className="border border-gray-300 px-2 py-1.5"></td>
               </tr>
               <tr className="bg-amber-50">
-                <td colSpan="9" className="border border-gray-300 px-2 py-1.5 text-right text-xs text-amber-700">
+                <td colSpan="8" className="border border-gray-300 px-2 py-1.5 text-right text-xs text-amber-700">
                   Previous Balance
                 </td>
                 <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-amber-700">
@@ -926,7 +930,7 @@ export default function ViewSale() {
                 <td className="border border-gray-300 px-2 py-1.5"></td>
               </tr>
               <tr className="bg-blue-50">
-                <td colSpan="9" className="border border-gray-300 px-2 py-1.5 text-right text-xs text-blue-700">
+                <td colSpan="8" className="border border-gray-300 px-2 py-1.5 text-right text-xs text-blue-700">
                   Paid
                 </td>
                 <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-blue-700">
@@ -935,7 +939,7 @@ export default function ViewSale() {
                 <td className="border border-gray-300 px-2 py-1.5"></td>
               </tr>
               <tr className={`${currentBalance > 0 ? 'bg-red-100' : 'bg-green-100'}`}>
-                <td colSpan="9" className={`border border-gray-300 px-2 py-1.5 text-right text-sm uppercase ${currentBalance > 0 ? 'text-red-700' : 'text-green-700'}`}>
+                <td colSpan="8" className={`border border-gray-300 px-2 py-1.5 text-right text-sm uppercase ${currentBalance > 0 ? 'text-red-700' : 'text-green-700'}`}>
                   Current Balance
                 </td>
                 <td className={`border border-gray-300 px-2 py-1.5 text-right font-mono text-base ${currentBalance > 0 ? 'text-red-700' : 'text-green-700'}`}>

@@ -6,7 +6,8 @@ from person.models import Employee, Customer
 class SaleOrder(models.Model):
     # Master Record
     invoice_number = models.CharField(max_length=20, unique=True, editable=False)
-    sold_by = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, related_name='sales_made')
+    sold_by = models.CharField(max_length=100, blank=True, null=True, 
+                               help_text="Name of the person who made the sale")
     customer = models.ForeignKey(Customer, on_delete=models.SET_NULL, null=True, blank=True, related_name='purchase_history')
     
     sale_date = models.DateTimeField(auto_now_add=True)

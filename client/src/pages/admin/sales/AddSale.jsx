@@ -27,6 +27,8 @@ export default function AddSale() {
   const [customers, setCustomers] = useState([]);
   const [brands, setBrands] = useState([]);
   const [stocks, setStocks] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [currentUser, setCurrentUser] = useState(null);
 
   // --- UI TOGGLE STATE ---
   const [entryMode, setEntryMode] = useState("manual");
@@ -87,12 +89,13 @@ export default function AddSale() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [prodRes, empRes, custRes, brandRes, stockRes] = await Promise.all([
+        const [prodRes, empRes, custRes, brandRes, stockRes, usersRes] = await Promise.all([
           axiosInstance.get("products/"),
           axiosInstance.get("person/employees/"),
           axiosInstance.get("person/customers/"),
           axiosInstance.get("brand/brands/"),
           axiosInstance.get("stock/stocks/"),
+          axiosInstance.get("users/users/"),
         ]);
 
         setProducts(prodRes.data.results || prodRes.data);
@@ -100,6 +103,35 @@ export default function AddSale() {
         setCustomers(custRes.data.results || custRes.data);
         setBrands(brandRes.data.results || brandRes.data);
         setStocks(stockRes.data.results || stockRes.data);
+        setUsers(usersRes.data || []);
+
+        // Get current user
+        const storedUser = localStorage.getItem('user');
+        if (storedUser) {
+          try {
+            const parsedUser = JSON.parse(storedUser);
+            const user = usersRes.data?.find(u => u.id === parsedUser.id);
+            if (user) {
+              setCurrentUser(user);
+              setOrderData(prev => ({
+                ...prev,
+                sold_by: user.id
+              }));
+            }
+          } catch (e) {
+            console.error("Error parsing stored user", e);
+          }
+        }
+        
+        // If no user found in localStorage, try to get from the first user
+        if (!currentUser && usersRes.data && usersRes.data.length > 0) {
+          const firstUser = usersRes.data[0];
+          setCurrentUser(firstUser);
+          setOrderData(prev => ({
+            ...prev,
+            sold_by: firstUser.id
+          }));
+        }
       } catch (err) {
         console.error("Failed to fetch data", err);
         setError("Warning: Could not load initial data. Check server connection.");
@@ -550,7 +582,7 @@ export default function AddSale() {
         product: item.product,
         quantity: parseInt(item.quantity, 10),
         unit_price_bdt: parseFloat(item.unit_price_bdt).toFixed(2),
-        multiplier: item.multiplier ? parseFloat(item.multiplier).toFixed(2) : null, // Include multiplier
+        multiplier: item.multiplier ? parseFloat(item.multiplier).toFixed(2) : null,
       })),
     };
 
@@ -687,30 +719,25 @@ export default function AddSale() {
             )}
           </div>
 
+          {/* Sold By - Auto-filled with current user */}
           <div>
             <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider">
-              Sold By (Employee) *
+              Sold By (Auto)
             </label>
-            <select
-              name="sold_by"
-              required
-              value={orderData.sold_by}
-              onChange={handleOrderChange}
-              className="w-full bg-white border border-gray-300 rounded p-1 text-sm text-gray-800 focus:ring-1 focus:ring-green-500 focus:border-green-500 outline-none"
-            >
-              <option value="">-- Select Employee --</option>
-              {employees.map((e) => {
-                const displayName = e.first_name
-                  ? `${e.first_name} ${e.last_name || ""}`.trim()
-                  : e.full_name || e.name || e.employee_id;
-                return (
-                  <option key={e.id} value={e.id}>
-                    {displayName} ({e.employee_id})
-                  </option>
-                );
-              })}
-            </select>
+            <div className="w-full bg-gray-100 border border-gray-300 rounded p-1 text-sm text-gray-800">
+              {currentUser ? (
+                <span>{currentUser.full_name || currentUser.username}</span>
+              ) : (
+                <span className="text-gray-400">Loading user...</span>
+              )}
+            </div>
+            {currentUser && (
+              <div className="mt-0.5 text-[9px] text-gray-400">
+                ID: {currentUser.id}
+              </div>
+            )}
           </div>
+
           <div>
             <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider">
               Payment Status

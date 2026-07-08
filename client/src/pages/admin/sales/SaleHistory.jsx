@@ -21,6 +21,7 @@ export default function SaleHistory() {
   const [customers, setCustomers] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [brands, setBrands] = useState([]);
+  const [users, setUsers] = useState([]); // Add users state
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -38,12 +39,13 @@ export default function SaleHistory() {
 
   const fetchData = async () => {
     try {
-      const [saleRes, prodRes, custRes, empRes, brandRes] = await Promise.all([
+      const [saleRes, prodRes, custRes, empRes, brandRes, usersRes] = await Promise.all([
         axiosInstance.get("sale/sales/"),
         axiosInstance.get("products/"),
         axiosInstance.get("person/customers/"),
         axiosInstance.get("person/employees/"),
         axiosInstance.get("brand/brands/"),
+        axiosInstance.get("users/users/"), // Fetch users
       ]);
 
       setSales(saleRes.data.results || saleRes.data);
@@ -51,6 +53,7 @@ export default function SaleHistory() {
       setCustomers(custRes.data.results || custRes.data);
       setEmployees(empRes.data.results || empRes.data);
       setBrands(brandRes.data.results || brandRes.data);
+      setUsers(usersRes.data || []); // Set users
       setLoading(false);
     } catch (err) {
       console.error(err);
@@ -68,6 +71,14 @@ export default function SaleHistory() {
 
   const getEmployeeName = (id) => {
     if (!id) return "Unknown";
+    
+    // First try to find in users
+    const user = users.find((u) => String(u.id) === String(id));
+    if (user) {
+      return user.full_name || user.username || `User #${user.id}`;
+    }
+    
+    // Fallback to employees
     const emp = employees.find((e) => String(e.id) === String(id));
     if (!emp) return "Unknown";
     return emp.first_name
@@ -476,7 +487,7 @@ export default function SaleHistory() {
                   </div>
                   <div>
                     <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
-                      Sold By (Employee)
+                      Sold By
                     </label>
                     <p className="text-sm font-medium text-gray-800">
                       {getEmployeeName(editFormData.sold_by)}
