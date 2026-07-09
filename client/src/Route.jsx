@@ -82,6 +82,7 @@ export const router = createBrowserRouter([
       // Purchase Routes
       { path: "purchase", element: <PurchaseHistory /> },
       { path: "purchase/add", element: <AddPurchase /> },
+      { path: "purchase/edit/:id", element: <AddPurchase /> },
 
       // Stock Routes
       { path: "stock", element: <StockList /> },
@@ -89,6 +90,7 @@ export const router = createBrowserRouter([
       // Sales Routes
       { path: "sales", element: <SaleHistory /> },
       { path: "sales/add", element: <AddSale /> },
+      { path: "sales/edit/:id", element: <AddSale /> },
       { path: "sales/draft", element: <AddDraftSale /> },
       { path: "sales/draft/:id", element: <AddDraftSale /> },
       { path: "sales/draftlist", element: <DraftSaleList /> },

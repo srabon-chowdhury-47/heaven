@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import axiosInstance from "../../../api/axios";
+import { userService } from "../../../api/user";
 import {
   FiPlus,
   FiTrash2,
@@ -11,11 +12,18 @@ import {
   FiSave,
   FiArrowLeft,
   FiSearch,
+  FiUpload,
+  FiDownload,
 } from "react-icons/fi";
+import * as XLSX from "xlsx";
 
 export default function AddPurchase() {
   const navigate = useNavigate();
+  const { id } = useParams();
+  const isEditing = !!id;
+
   const [loading, setLoading] = useState(false);
+  const [fetchingPurchase, setFetchingPurchase] = useState(isEditing);
   const [error, setError] = useState("");
 
   // --- CORE DATA STATES ---
@@ -24,6 +32,8 @@ export default function AddPurchase() {
   const [suppliers, setSuppliers] = useState([]);
   const [brands, setBrands] = useState([]);
   const [stocks, setStocks] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [currentUser, setCurrentUser] = useState(null);
 
   // --- UI TOGGLE STATE ---
   const [entryMode, setEntryMode] = useState("manual");
@@ -57,16 +67,68 @@ export default function AddPurchase() {
 
   // Refs for dropdown outside click handling
   const dropdownRefs = useRef({});
+  const fileInputRef = useRef(null);
+
+  // --- Load Current User ---
+  const loadCurrentUser = async (usersData) => {
+    try {
+      const storedUser = userService.getCurrentUserFromStorage();
+      if (storedUser && storedUser.id) {
+        const user = usersData?.find(u => u.id === storedUser.id);
+        if (user) {
+          setCurrentUser(user);
+          if (!isEditing) {
+            setOrderData(prev => ({
+              ...prev,
+              entry_by: user.id
+            }));
+          }
+          return;
+        }
+      }
+
+      try {
+        const user = await userService.getCurrentUser();
+        if (user && user.id) {
+          setCurrentUser(user);
+          if (!isEditing) {
+            setOrderData(prev => ({
+              ...prev,
+              entry_by: user.id
+            }));
+          }
+          localStorage.setItem('user', JSON.stringify(user));
+          return;
+        }
+      } catch (err) {
+        console.error("Failed to fetch current user from API", err);
+      }
+
+      if (usersData && usersData.length > 0) {
+        const firstUser = usersData[0];
+        setCurrentUser(firstUser);
+        if (!isEditing) {
+          setOrderData(prev => ({
+            ...prev,
+            entry_by: firstUser.id
+          }));
+        }
+      }
+    } catch (err) {
+      console.error("Error loading current user:", err);
+    }
+  };
 
   // --- FETCH DATA ---
   const fetchData = async () => {
     try {
-      const [prodRes, empRes, supRes, brandRes, stockRes] = await Promise.all([
+      const [prodRes, empRes, supRes, brandRes, stockRes, usersRes] = await Promise.all([
         axiosInstance.get("products/"),
         axiosInstance.get("person/employees/"),
         axiosInstance.get("supplier/suppliers/"),
         axiosInstance.get("brand/brands/"),
         axiosInstance.get("stock/stocks/"),
+        axiosInstance.get("users/users/"),
       ]);
 
       setProducts(prodRes.data.results || prodRes.data);
@@ -74,15 +136,313 @@ export default function AddPurchase() {
       setSuppliers(supRes.data.results || supRes.data);
       setBrands(brandRes.data.results || brandRes.data);
       setStocks(stockRes.data.results || stockRes.data);
+      setUsers(usersRes.data || []);
+
+      await loadCurrentUser(usersRes.data);
+      
+      if (isEditing) {
+        await fetchPurchaseData();
+      }
     } catch (err) {
       console.error("Failed to fetch data", err);
       setError("Warning: Could not load initial data. Check server connection.");
+      setFetchingPurchase(false);
+    }
+  };
+
+  // --- FETCH PURCHASE DATA FOR EDITING ---
+  const fetchPurchaseData = async () => {
+    try {
+      console.log("Fetching purchase with ID:", id);
+      const response = await axiosInstance.get(`purchase/purchases/${id}/`);
+      const purchase = response.data;
+      console.log("Purchase data:", purchase);
+
+      const entryBy = currentUser?.id || purchase.entry_by || "";
+
+      setOrderData({
+        supplier: purchase.supplier || "",
+        invoice_number: purchase.invoice_number || "",
+        remarks: purchase.remarks || "",
+        entry_by: entryBy,
+      });
+
+      if (purchase.items && purchase.items.length > 0) {
+        const items = purchase.items.map((item) => {
+          const product = products.find((p) => String(p.id) === String(item.product));
+          const partNumber = product?.part_number || "";
+          const productName = item.product_name || product?.product_name || product?.name || "";
+          const searchText = partNumber ? `${partNumber} - ${productName}` : productName;
+
+          return {
+            product: item.product,
+            unit_cost_bdt: parseFloat(item.unit_cost_bdt).toFixed(2),
+            quantity: item.quantity,
+            search: searchText,
+            showDropdown: false,
+          };
+        });
+        setManualItems(items);
+        setManualItems((prev) => [...prev, { 
+          product: "", 
+          unit_cost_bdt: "", 
+          quantity: "", 
+          search: "", 
+          showDropdown: false 
+        }]);
+      }
+
+      setFetchingPurchase(false);
+    } catch (err) {
+      console.error("Failed to fetch purchase", err);
+      setError("Could not load purchase for editing. The purchase may not exist or you may not have permission.");
+      setFetchingPurchase(false);
+      setTimeout(() => {
+        navigate("/dashboard/purchase");
+      }, 2000);
     }
   };
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [id]);
+
+  // --- EXCEL IMPORT FUNCTION ---
+  const handleExcelImport = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = new Uint8Array(event.target.result);
+        const workbook = XLSX.read(data, { type: "array" });
+        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+        const jsonData = XLSX.utils.sheet_to_json(firstSheet);
+
+        if (jsonData.length === 0) {
+          setError("The Excel file is empty.");
+          return;
+        }
+
+        // Map columns (case insensitive)
+        const headers = Object.keys(jsonData[0]).map(h => h.toLowerCase().trim());
+        const partNoIndex = headers.findIndex(h => h.includes('part') || h.includes('partno'));
+        const quantityIndex = headers.findIndex(h => h.includes('quantity') || h.includes('qty'));
+        const mrpIndex = headers.findIndex(h => h.includes('mrp') || h.includes('price') || h.includes('cost'));
+
+        if (partNoIndex === -1 || quantityIndex === -1 || mrpIndex === -1) {
+          setError("Excel must contain 'Part No', 'Quantity', and 'MRP' columns.");
+          return;
+        }
+
+        const columnKeys = Object.keys(jsonData[0]);
+        const partNoKey = columnKeys[partNoIndex];
+        const quantityKey = columnKeys[quantityIndex];
+        const mrpKey = columnKeys[mrpIndex];
+
+        // Process each row
+        const newItems = [];
+        let hasError = false;
+
+        jsonData.forEach((row, idx) => {
+          const partNo = String(row[partNoKey] || "").trim();
+          const quantity = parseFloat(row[quantityKey]);
+          const mrp = parseFloat(row[mrpKey]);
+
+          if (!partNo || isNaN(quantity) || isNaN(mrp)) {
+            console.warn(`Skipping row ${idx + 2}: Invalid data`);
+            return;
+          }
+
+          // Find product by part number (case insensitive)
+          const product = products.find(p => 
+            p.part_number && p.part_number.toLowerCase() === partNo.toLowerCase()
+          );
+
+          if (!product) {
+            hasError = true;
+            setError(`Product with Part No "${partNo}" not found in the system. Please check the part number.`);
+            return;
+          }
+
+          // Check if product already exists in the list
+          const isDuplicate = manualItems.some(item => 
+            String(item.product) === String(product.id)
+          );
+
+          if (!isDuplicate) {
+            newItems.push({
+              product: product.id,
+              unit_cost_bdt: mrp.toFixed(2),
+              quantity: quantity.toString(),
+              search: `${partNo} - ${product.product_name || product.name}`,
+              showDropdown: false,
+            });
+          }
+        });
+
+        if (hasError) return;
+
+        if (newItems.length === 0) {
+          setError("No valid products found in the Excel file.");
+          return;
+        }
+
+        // Remove the last empty row if it exists
+        const updatedItems = [...manualItems];
+        // Remove the last empty item if it's empty
+        const lastItem = updatedItems[updatedItems.length - 1];
+        if (lastItem && !lastItem.product && !lastItem.quantity && !lastItem.unit_cost_bdt) {
+          updatedItems.pop();
+        }
+
+        // Add new items
+        setManualItems([...updatedItems, ...newItems, { 
+          product: "", 
+          unit_cost_bdt: "", 
+          quantity: "", 
+          search: "", 
+          showDropdown: false 
+        }]);
+
+        setError("");
+        alert(`Successfully imported ${newItems.length} products from Excel.`);
+
+      } catch (err) {
+        console.error("Error reading Excel file:", err);
+        setError("Failed to read Excel file. Please ensure it's a valid .xlsx or .xls file.");
+      }
+    };
+
+    reader.readAsArrayBuffer(file);
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  // --- DOWNLOAD TEMPLATE ---
+  const handleDownloadTemplate = () => {
+    try {
+      const templateData = [
+        {
+          'Part No': '1100223/C',
+          'Quantity': 5,
+          'MRP': 618,
+        },
+        {
+          'Part No': '1570209/E',
+          'Quantity': 4,
+          'MRP': 502,
+        },
+        {
+          'Part No': '1570250/D',
+          'Quantity': 30,
+          'MRP': 160,
+        },
+      ];
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(templateData);
+      
+      ws['!cols'] = [
+        { wch: 20 },
+        { wch: 15 },
+        { wch: 15 },
+      ];
+
+      XLSX.utils.book_append_sheet(wb, ws, "Template");
+      XLSX.writeFile(wb, "purchase_import_template.xlsx");
+    } catch (err) {
+      console.error("Error downloading template:", err);
+      alert("Failed to download template.");
+    }
+  };
+
+  // --- EXPORT CURRENT PURCHASE TO EXCEL ---
+  const handleExportPurchase = () => {
+    try {
+      const itemsToExport = manualItems.filter(
+        (i) => i.product && parseFloat(i.quantity) > 0 && parseFloat(i.unit_cost_bdt) >= 0
+      );
+
+      if (itemsToExport.length === 0) {
+        alert("No products to export. Please add products to the purchase first.");
+        return;
+      }
+
+      const exportData = itemsToExport.map((item, idx) => {
+        const product = products.find((p) => String(p.id) === String(item.product));
+        const supplierName = suppliers.find(s => String(s.id) === String(orderData.supplier));
+        return {
+          '#': idx + 1,
+          'Part No': product?.part_number || "N/A",
+          'Product Name': product?.product_name || product?.name || "Unknown",
+          'Brand': product ? getBrandName(product.brand) : "N/A",
+          'Unit Cost (BDT)': parseFloat(item.unit_cost_bdt || 0).toFixed(2),
+          'Quantity': item.quantity || 0,
+          'Total': (parseFloat(item.quantity || 0) * parseFloat(item.unit_cost_bdt || 0)).toFixed(2),
+        };
+      });
+
+      // Add summary row
+      const grandTotal = itemsToExport.reduce((sum, item) => {
+        return sum + (parseFloat(item.quantity || 0) * parseFloat(item.unit_cost_bdt || 0));
+      }, 0);
+
+      const supplierName = suppliers.find(s => String(s.id) === String(orderData.supplier));
+      
+      // Add header info
+      const headerRow = {
+        '#': '',
+        'Part No': 'Invoice: ' + (orderData.invoice_number || 'N/A'),
+        'Product Name': 'Supplier: ' + (supplierName?.name || supplierName?.company_name || 'N/A'),
+        'Brand': 'Remarks: ' + (orderData.remarks || 'N/A'),
+        'Unit Cost (BDT)': '',
+        'Quantity': '',
+        'Total': '',
+      };
+
+      // Add footer with grand total
+      const footerRow = {
+        '#': '',
+        'Part No': '',
+        'Product Name': '',
+        'Brand': '',
+        'Unit Cost (BDT)': '',
+        'Quantity': '',
+        'Total': 'Grand Total: ৳ ' + grandTotal.toFixed(2),
+      };
+
+      // Combine all data
+      const finalData = [headerRow, ...exportData, footerRow];
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(finalData);
+      
+      ws['!cols'] = [
+        { wch: 5 },
+        { wch: 20 },
+        { wch: 30 },
+        { wch: 15 },
+        { wch: 15 },
+        { wch: 10 },
+        { wch: 20 },
+      ];
+
+      XLSX.utils.book_append_sheet(wb, ws, "Purchase Order");
+      
+      const invoiceNo = orderData.invoice_number || "purchase";
+      const timestamp = new Date().toISOString().slice(0, 10);
+      const filename = `purchase_order_${invoiceNo}_${timestamp}.xlsx`;
+      
+      XLSX.writeFile(wb, filename);
+    } catch (err) {
+      console.error("Error exporting purchase:", err);
+      alert("Failed to export purchase to Excel.");
+    }
+  };
 
   // --- HELPERS ---
   const getProductStock = (productId) => {
@@ -111,7 +471,6 @@ export default function AddPurchase() {
     setAddingSupplier(true);
     setSupplierError("");
 
-    // Simple validation
     if (!newSupplier.name.trim()) {
       setSupplierError("Supplier name is required.");
       setAddingSupplier(false);
@@ -122,14 +481,11 @@ export default function AddPurchase() {
       const response = await axiosInstance.post("supplier/suppliers/", newSupplier);
       const createdSupplier = response.data;
 
-      // Refresh supplier list (re-fetch)
       const supRes = await axiosInstance.get("supplier/suppliers/");
       setSuppliers(supRes.data.results || supRes.data);
 
-      // Auto-select the new supplier
       setOrderData((prev) => ({ ...prev, supplier: createdSupplier.id }));
 
-      // Close modal and reset form
       setShowSupplierModal(false);
       setNewSupplier({ name: "", contact_person: "", phone: "", email: "", address: "" });
     } catch (err) {
@@ -146,7 +502,7 @@ export default function AddPurchase() {
     setNewSupplier({ name: "", contact_person: "", phone: "", email: "", address: "" });
   };
 
-  // --- MANUAL MODE (with duplicate prevention & z-index fix) ---
+  // --- MANUAL MODE ---
   const handleManualItemChange = (index, field, value) => {
     const newItems = [...manualItems];
     if (field === "search") {
@@ -157,7 +513,6 @@ export default function AddPurchase() {
     }
 
     if (field === "product") {
-      // Prevent selecting the same product twice
       const isDuplicate = manualItems.some(
         (item, i) => i !== index && String(item.product) === String(value)
       );
@@ -170,13 +525,11 @@ export default function AddPurchase() {
       if (selectedProduct) {
         newItems[index].product = value;
         newItems[index].unit_cost_bdt = selectedProduct.purchase_cost_bdt || "";
-        // Show part number + name after selection
         const partNum = selectedProduct.part_number || "";
         const name = selectedProduct.product_name || selectedProduct.name || "";
         newItems[index].search = partNum ? `${partNum} - ${name}` : name;
         newItems[index].showDropdown = false;
       }
-      // Auto‑add a new empty row if this is the last row
       if (index === newItems.length - 1) {
         newItems.push({ product: "", unit_cost_bdt: "", quantity: "", search: "", showDropdown: false });
       }
@@ -194,7 +547,6 @@ export default function AddPurchase() {
     }
   };
 
-  // Filter products – include part_number in search, exclude already selected ones
   const getFilteredProducts = (searchText) => {
     const lowerSearch = searchText.toLowerCase();
     const selectedProductIds = manualItems
@@ -210,7 +562,6 @@ export default function AddPurchase() {
     });
   };
 
-  // Close dropdown on outside click
   useEffect(() => {
     const handleClickOutside = (event) => {
       let outside = true;
@@ -311,6 +662,13 @@ export default function AddPurchase() {
       return;
     }
 
+    const entryBy = currentUser?.id || orderData.entry_by;
+    if (!entryBy) {
+      setError("Please select the Employee making this purchase.");
+      setLoading(false);
+      return;
+    }
+
     let itemsToSubmit = [];
     if (entryMode === "manual") {
       itemsToSubmit = manualItems.filter(
@@ -329,7 +687,10 @@ export default function AddPurchase() {
     }
 
     const payload = {
-      ...orderData,
+      supplier: parseInt(orderData.supplier),
+      invoice_number: orderData.invoice_number || "",
+      remarks: orderData.remarks || "",
+      entry_by: parseInt(entryBy),
       items: itemsToSubmit.map((item) => ({
         product: item.product,
         quantity: parseInt(item.quantity, 10),
@@ -338,14 +699,26 @@ export default function AddPurchase() {
     };
 
     try {
-      await axiosInstance.post("purchase/purchases/", payload);
-      navigate("/dashboard/payments");
+      if (isEditing) {
+        await axiosInstance.put(`purchase/purchases/${id}/`, payload);
+      } else {
+        await axiosInstance.post("purchase/purchases/", payload);
+      }
+      navigate("/dashboard/purchase");
     } catch (err) {
       console.error(err);
       setError(err.response?.data?.detail || "Failed to save purchase entry. Check inputs.");
       setLoading(false);
     }
   };
+
+  if (fetchingPurchase) {
+    return (
+      <div className="max-w-7xl mx-auto p-3 bg-gray-50 min-h-screen flex justify-center items-center">
+        <p className="text-gray-500">Loading purchase...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto p-3 bg-gray-50 min-h-screen">
@@ -359,12 +732,24 @@ export default function AddPurchase() {
             <FiArrowLeft size={18} />
           </button>
           <h1 className="text-xl font-bold flex items-center gap-2">
-            <FiShoppingBag className="text-blue-600" /> New Purchase Order
+            <FiShoppingBag className="text-blue-600" /> {isEditing ? "Edit Purchase Order" : "New Purchase Order"}
           </h1>
         </div>
-        <div className="text-right">
-          <span className="text-[10px] text-gray-500 uppercase tracking-wider">Total Value</span>
-          <div className="text-xl font-bold text-blue-600">৳ {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+        <div className="flex items-center gap-4">
+          {/* Export Button - Always visible when there are items */}
+          {manualItems.some(item => item.product && parseFloat(item.quantity) > 0) && (
+            <button
+              type="button"
+              onClick={handleExportPurchase}
+              className="flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded border border-purple-300 bg-purple-50 text-purple-700 hover:bg-purple-100 transition"
+            >
+              <FiDownload size={14} /> Export Purchase
+            </button>
+          )}
+          <div className="text-right">
+            <span className="text-[10px] text-gray-500 uppercase tracking-wider">Total Value</span>
+            <div className="text-xl font-bold text-blue-600">৳ {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+          </div>
         </div>
       </div>
 
@@ -414,25 +799,19 @@ export default function AddPurchase() {
             />
           </div>
           <div>
-            <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider">Entry By</label>
-            <select
-              name="entry_by"
-              value={orderData.entry_by}
-              onChange={handleOrderChange}
-              className="w-full bg-white border border-gray-300 rounded p-1 text-sm text-gray-800 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none"
-            >
-              <option value="">-- Select Employee --</option>
-              {employees.map((e) => {
-                const displayName = e.first_name
-                  ? `${e.first_name} ${e.last_name || ""}`.trim()
-                  : e.full_name || e.name || e.employee_id;
-                return (
-                  <option key={e.id} value={e.id}>
-                    {displayName} ({e.employee_id})
-                  </option>
-                );
-              })}
-            </select>
+            <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider">Entry By (Auto)</label>
+            <div className="w-full bg-gray-100 border border-gray-300 rounded p-1 text-sm text-gray-800">
+              {currentUser ? (
+                <span>{currentUser.full_name || currentUser.username || currentUser.first_name || "User"}</span>
+              ) : (
+                <span className="text-gray-400">Loading user...</span>
+              )}
+            </div>
+            {currentUser && (
+              <div className="mt-0.5 text-[9px] text-gray-400">
+                ID: {currentUser.id} • {currentUser.email || "No email"}
+              </div>
+            )}
           </div>
           <div>
             <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider">Remarks</label>
@@ -447,33 +826,67 @@ export default function AddPurchase() {
         </div>
 
         {/* --- ENTRY MODE TOGGLE --- */}
-        <div className="bg-gray-50 border-b border-gray-300 px-3 py-1.5 flex gap-2">
+        <div className="bg-gray-50 border-b border-gray-300 px-3 py-1.5 flex gap-2 flex-wrap items-center">
           <button
             type="button"
             onClick={() => setEntryMode("manual")}
+            disabled={isEditing}
             className={`flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded border transition ${
               entryMode === "manual"
                 ? "bg-blue-100 text-blue-800 border-blue-300"
                 : "bg-white text-gray-600 border-gray-300 hover:bg-gray-100"
-            }`}
+            } ${isEditing ? "opacity-50 cursor-not-allowed" : ""}`}
           >
             <FiEdit2 size={14} /> Manual
           </button>
           <button
             type="button"
             onClick={() => setEntryMode("brand")}
+            disabled={isEditing}
             className={`flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded border transition ${
               entryMode === "brand"
                 ? "bg-blue-100 text-blue-800 border-blue-300"
                 : "bg-white text-gray-600 border-gray-300 hover:bg-gray-100"
-            }`}
+            } ${isEditing ? "opacity-50 cursor-not-allowed" : ""}`}
           >
             <FiLayers size={14} /> Batch by Brand
           </button>
+          
+          {/* Excel Import Button - Always visible in manual mode */}
+          {entryMode === "manual" && (
+            <div className="ml-auto flex items-center gap-2">
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleExcelImport}
+                accept=".xlsx,.xls"
+                className="hidden"
+                id="excel-upload"
+              />
+              <label
+                htmlFor="excel-upload"
+                className="flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded border border-green-300 bg-green-50 text-green-700 hover:bg-green-100 cursor-pointer transition"
+              >
+                <FiUpload size={14} /> Import Excel
+              </label>
+              <button
+                type="button"
+                onClick={handleDownloadTemplate}
+                className="flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 cursor-pointer transition"
+              >
+                <FiDownload size={14} /> Template
+              </button>
+              <span className="text-[9px] text-gray-400">(Part No, Qty, MRP)</span>
+            </div>
+          )}
+          
+          {isEditing && entryMode === "brand" && (
+            <span className="text-xs text-gray-500 ml-2">(Brand mode disabled for editing)</span>
+          )}
         </div>
 
         {/* --- BRAND SELECTOR (only in brand mode) --- */}
-        {entryMode === "brand" && (
+        {!isEditing && entryMode === "brand" && (
           <div className="bg-blue-50/50 border-b border-gray-300 px-3 py-2 flex flex-col md:flex-row md:items-center justify-between gap-2">
             <div className="flex-1 max-w-sm">
               <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">Add Brands</label>
@@ -526,7 +939,7 @@ export default function AddPurchase() {
               </tr>
             </thead>
             <tbody>
-              {entryMode === "brand" &&
+              {!isEditing && entryMode === "brand" &&
                 brandItems.map((item, index) => (
                   <tr key={item.product} className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}>
                     <td className="border border-gray-300 px-2 py-1.5 text-center text-xs text-gray-500">{index + 1}</td>
@@ -695,7 +1108,7 @@ export default function AddPurchase() {
                   );
                 })}
 
-              {entryMode === "brand" && brandItems.length === 0 && (
+              {!isEditing && entryMode === "brand" && brandItems.length === 0 && (
                 <tr>
                   <td colSpan="7" className="border border-gray-300 px-3 py-4 text-center text-gray-400 text-sm">
                     Use the brand selector above to load products.
@@ -708,7 +1121,7 @@ export default function AddPurchase() {
 
         {/* --- ADD ROW BUTTON (Manual only) --- */}
         {entryMode === "manual" && (
-          <div className="p-2 border-t border-gray-200">
+          <div className="p-2 border-t border-gray-200 flex justify-between items-center">
             <button
               type="button"
               onClick={() =>
@@ -718,6 +1131,9 @@ export default function AddPurchase() {
             >
               <FiPlus size={14} /> Add Row
             </button>
+            <div className="text-[10px] text-gray-400">
+              <span className="font-medium">Tip:</span> Import Excel to add multiple products at once
+            </div>
           </div>
         )}
 
@@ -727,7 +1143,7 @@ export default function AddPurchase() {
             Cancel
           </button>
           <button type="submit" disabled={loading} className={`px-6 py-1.5 rounded text-sm font-bold text-white transition ${loading ? "bg-blue-400 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700"}`}>
-            {loading ? "Saving..." : "Save Purchase"}
+            {loading ? "Saving..." : isEditing ? "Update Purchase" : "Save Purchase"}
           </button>
         </div>
       </form>

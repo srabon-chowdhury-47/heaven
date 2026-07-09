@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import axiosInstance from "../../../api/axios";
+import { userService } from "../../../api/user";
 import {
   FiPlus,
   FiTrash2,
@@ -13,7 +14,10 @@ import {
   FiArrowLeft,
   FiSearch,
   FiTrendingUp,
+  FiUpload,
+  FiDownload,
 } from "react-icons/fi";
+import * as XLSX from "xlsx";
 
 export default function AddDraftSale() {
   const navigate = useNavigate();
@@ -79,7 +83,64 @@ export default function AddDraftSale() {
     town_village: "",
   });
 
+  // --- IMPORT/EXPORT STATES ---
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [importData, setImportData] = useState([]);
+  const [importError, setImportError] = useState("");
+  const [importing, setImporting] = useState(false);
+  const fileInputRef = useRef(null);
+
   const dropdownRefs = useRef({});
+
+  // --- Load Current User ---
+  const loadCurrentUser = async (usersData) => {
+    try {
+      const storedUser = userService.getCurrentUserFromStorage();
+      if (storedUser && storedUser.id) {
+        const user = usersData?.find(u => u.id === storedUser.id);
+        if (user) {
+          setCurrentUser(user);
+          if (!isEditing) {
+            setOrderData(prev => ({
+              ...prev,
+              sold_by: user.id
+            }));
+          }
+          return;
+        }
+      }
+
+      try {
+        const user = await userService.getCurrentUser();
+        if (user && user.id) {
+          setCurrentUser(user);
+          if (!isEditing) {
+            setOrderData(prev => ({
+              ...prev,
+              sold_by: user.id
+            }));
+          }
+          localStorage.setItem('user', JSON.stringify(user));
+          return;
+        }
+      } catch (err) {
+        console.error("Failed to fetch current user from API", err);
+      }
+
+      if (usersData && usersData.length > 0) {
+        const firstUser = usersData[0];
+        setCurrentUser(firstUser);
+        if (!isEditing) {
+          setOrderData(prev => ({
+            ...prev,
+            sold_by: firstUser.id
+          }));
+        }
+      }
+    } catch (err) {
+      console.error("Error loading current user:", err);
+    }
+  };
 
   // --- FETCH INITIAL DATA ---
   useEffect(() => {
@@ -94,43 +155,15 @@ export default function AddDraftSale() {
           axiosInstance.get("users/users/"),
         ]);
 
-        setProducts(prodRes.data.results || prodRes.data);
+        const productsData = prodRes.data.results || prodRes.data;
+        setProducts(productsData);
         setEmployees(empRes.data.results || empRes.data);
         setCustomers(custRes.data.results || custRes.data);
         setBrands(brandRes.data.results || brandRes.data);
         setStocks(stockRes.data.results || stockRes.data);
         setUsers(usersRes.data || []);
 
-        // Get current user - you can modify this based on your auth system
-        // Option 1: Get from localStorage
-        const storedUser = localStorage.getItem('user');
-        if (storedUser) {
-          try {
-            const parsedUser = JSON.parse(storedUser);
-            const user = usersRes.data?.find(u => u.id === parsedUser.id);
-            if (user) {
-              setCurrentUser(user);
-              setOrderData(prev => ({
-                ...prev,
-                sold_by: user.id
-              }));
-            }
-          } catch (e) {
-            console.error("Error parsing stored user", e);
-          }
-        }
-        
-        // Option 2: Get from session or token
-        // If no user found in localStorage, try to get from the first user or your auth context
-        if (!currentUser && usersRes.data && usersRes.data.length > 0) {
-          // You might want to filter active users or get the currently logged in user
-          const firstUser = usersRes.data[0];
-          setCurrentUser(firstUser);
-          setOrderData(prev => ({
-            ...prev,
-            sold_by: firstUser.id
-          }));
-        }
+        await loadCurrentUser(usersRes.data);
       } catch (err) {
         console.error("Failed to fetch data", err);
         setError("Warning: Could not load initial data. Check server connection.");
@@ -142,15 +175,18 @@ export default function AddDraftSale() {
   // --- FETCH DRAFT DATA FOR EDITING ---
   useEffect(() => {
     if (!isEditing) return;
+    if (products.length === 0) return;
 
     const fetchDraft = async () => {
       try {
         const response = await axiosInstance.get(`draft-sale/draft-sales/${id}/`);
         const draft = response.data;
 
+        const soldBy = currentUser?.id || draft.sold_by || null;
+
         setOrderData({
           customer: draft.customer || "",
-          sold_by: draft.sold_by || (currentUser ? currentUser.id : null),
+          sold_by: soldBy,
           payment_status: draft.payment_status || "Unpaid",
           remarks: draft.remarks || "",
         });
@@ -281,6 +317,230 @@ export default function AddDraftSale() {
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
+
+  // --- EXCEL IMPORT FUNCTION ---
+  const handleExcelImport = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const data = new Uint8Array(event.target.result);
+        const workbook = XLSX.read(data, { type: "array" });
+        const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+        const jsonData = XLSX.utils.sheet_to_json(firstSheet);
+
+        if (jsonData.length === 0) {
+          setImportError("The Excel file is empty.");
+          return;
+        }
+
+        // Map columns (case insensitive)
+        const headers = Object.keys(jsonData[0]).map(h => h.toLowerCase().trim());
+        const partNoIndex = headers.findIndex(h => h.includes('part') || h.includes('partno'));
+        const quantityIndex = headers.findIndex(h => h.includes('quantity') || h.includes('qty'));
+
+        if (partNoIndex === -1 || quantityIndex === -1) {
+          setImportError("Excel must contain 'Part No' and 'Quantity' columns.");
+          return;
+        }
+
+        const columnKeys = Object.keys(jsonData[0]);
+        const partNoKey = columnKeys[partNoIndex];
+        const quantityKey = columnKeys[quantityIndex];
+
+        // Process each row
+        const validItems = [];
+        let hasError = false;
+
+        jsonData.forEach((row, idx) => {
+          const partNo = String(row[partNoKey] || "").trim();
+          const quantity = parseFloat(row[quantityKey]);
+
+          if (!partNo || isNaN(quantity) || quantity <= 0) {
+            console.warn(`Skipping row ${idx + 2}: Invalid data`);
+            return;
+          }
+
+          // Find product by part number (case insensitive)
+          const product = products.find(p => 
+            p.part_number && p.part_number.toLowerCase() === partNo.toLowerCase()
+          );
+
+          if (!product) {
+            hasError = true;
+            setImportError(`Product with Part No "${partNo}" not found in the system.`);
+            return;
+          }
+
+          // Check if product already exists in the list
+          const isDuplicate = manualItems.some(item => 
+            String(item.product) === String(product.id)
+          );
+
+          if (!isDuplicate) {
+            const purchasePrice = product.purchase_cost_bdt || 0;
+            const salePrice = product.sale_price_bdt || 0;
+            let multiplier = "";
+            if (purchasePrice > 0 && salePrice > 0) {
+              multiplier = (salePrice / purchasePrice).toFixed(2);
+            }
+
+            validItems.push({
+              product: product.id,
+              purchase_price_bdt: purchasePrice,
+              multiplier: multiplier,
+              unit_price_bdt: salePrice > 0 ? salePrice.toFixed(2) : "",
+              quantity: quantity.toString(),
+              search: `${partNo} - ${product.product_name || product.name}`,
+              showDropdown: false,
+            });
+          }
+        });
+
+        if (hasError) return;
+
+        if (validItems.length === 0) {
+          setImportError("No valid products found in the Excel file.");
+          return;
+        }
+
+        // Remove the last empty row if it exists
+        const updatedItems = [...manualItems];
+        const lastItem = updatedItems[updatedItems.length - 1];
+        if (lastItem && !lastItem.product && !lastItem.quantity && !lastItem.unit_price_bdt) {
+          updatedItems.pop();
+        }
+
+        // Add new items
+        setManualItems([...updatedItems, ...validItems, { 
+          product: "", 
+          purchase_price_bdt: "", 
+          multiplier: "", 
+          unit_price_bdt: "", 
+          quantity: "", 
+          search: "", 
+          showDropdown: false 
+        }]);
+
+        setImportError("");
+        alert(`Successfully imported ${validItems.length} products from Excel.`);
+
+      } catch (err) {
+        console.error("Error reading Excel file:", err);
+        setImportError("Failed to read Excel file. Please ensure it's a valid .xlsx or .xls file.");
+      }
+    };
+
+    reader.readAsArrayBuffer(file);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  };
+
+  // --- DOWNLOAD TEMPLATE ---
+  const handleDownloadTemplate = () => {
+    try {
+      const templateData = [
+        {
+          'Part No': '1100223/C',
+          'Quantity': 5,
+        },
+        {
+          'Part No': '1570209/E',
+          'Quantity': 4,
+        },
+        {
+          'Part No': '1570250/D',
+          'Quantity': 30,
+        },
+      ];
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(templateData);
+      
+      ws['!cols'] = [
+        { wch: 20 },
+        { wch: 15 },
+      ];
+
+      XLSX.utils.book_append_sheet(wb, ws, "Template");
+      XLSX.writeFile(wb, "draft_sale_import_template.xlsx");
+    } catch (err) {
+      console.error("Error downloading template:", err);
+      alert("Failed to download template.");
+    }
+  };
+
+  // --- EXPORT CURRENT DRAFT TO EXCEL ---
+  const handleExportDraft = () => {
+    try {
+      const itemsToExport = manualItems.filter(
+        (i) => i.product && parseFloat(i.quantity) > 0 && parseFloat(i.unit_price_bdt) >= 0
+      );
+
+      if (itemsToExport.length === 0) {
+        alert("No products to export. Please add products to the draft first.");
+        return;
+      }
+
+      const exportData = itemsToExport.map((item, idx) => {
+        const product = products.find((p) => String(p.id) === String(item.product));
+        return {
+          '#': idx + 1,
+          'Part No': product?.part_number || "N/A",
+          'Product Name': product?.product_name || product?.name || "Unknown",
+          'Purchase Price': parseFloat(item.purchase_price_bdt || 0).toFixed(2),
+          'Multiplier': item.multiplier || "",
+          'Sale Price': parseFloat(item.unit_price_bdt || 0).toFixed(2),
+          'Quantity': item.quantity || 0,
+          'Total': (parseFloat(item.quantity || 0) * parseFloat(item.unit_price_bdt || 0)).toFixed(2),
+        };
+      });
+
+      // Add summary row
+      const grandTotal = itemsToExport.reduce((sum, item) => {
+        return sum + (parseFloat(item.quantity || 0) * parseFloat(item.unit_price_bdt || 0));
+      }, 0);
+
+      exportData.push({
+        '#': '',
+        'Part No': '',
+        'Product Name': '',
+        'Purchase Price': '',
+        'Multiplier': '',
+        'Sale Price': '',
+        'Quantity': '',
+        'Total': 'Grand Total: ৳ ' + grandTotal.toFixed(2),
+      });
+
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      
+      ws['!cols'] = [
+        { wch: 5 },
+        { wch: 20 },
+        { wch: 30 },
+        { wch: 15 },
+        { wch: 12 },
+        { wch: 15 },
+        { wch: 10 },
+        { wch: 20 },
+      ];
+
+      XLSX.utils.book_append_sheet(wb, ws, "Draft Sale");
+      
+      const invoiceNo = orderData.invoice_number || "draft";
+      const timestamp = new Date().toISOString().slice(0, 10);
+      const filename = `draft_sale_${invoiceNo}_${timestamp}.xlsx`;
+      
+      XLSX.writeFile(wb, filename);
+    } catch (err) {
+      console.error("Error exporting draft:", err);
+      alert("Failed to export draft to Excel.");
+    }
+  };
 
   // --- HELPERS ---
   const getProductStock = (productId) => {
@@ -549,6 +809,13 @@ export default function AddDraftSale() {
     setLoading(true);
     setError("");
 
+    const soldBy = currentUser?.id || orderData.sold_by;
+    if (!soldBy) {
+      setError("Please select the Employee making this sale.");
+      setLoading(false);
+      return;
+    }
+
     let itemsToSubmit = [];
     if (entryMode === "manual") {
       itemsToSubmit = manualItems.filter(
@@ -568,7 +835,7 @@ export default function AddDraftSale() {
 
     const payload = {
       customer: orderData.customer ? parseInt(orderData.customer) : null,
-      sold_by: orderData.sold_by,
+      sold_by: parseInt(soldBy),
       payment_status: "Unpaid",
       remarks: orderData.remarks || "",
       items: itemsToSubmit.map((item) => ({
@@ -617,9 +884,21 @@ export default function AddDraftSale() {
             <FiShoppingCart className="text-blue-600" /> {isEditing ? "Edit Draft Sale" : "New Draft Sale"}
           </h1>
         </div>
-        <div className="text-right">
-          <span className="text-[10px] text-gray-500 uppercase tracking-wider">Total Value</span>
-          <div className="text-xl font-bold text-blue-600">৳ {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+        <div className="flex items-center gap-4">
+          {/* Export Button - Always visible when there are items */}
+          {manualItems.some(item => item.product && parseFloat(item.quantity) > 0) && (
+            <button
+              type="button"
+              onClick={handleExportDraft}
+              className="flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded border border-purple-300 bg-purple-50 text-purple-700 hover:bg-purple-100 transition"
+            >
+              <FiDownload size={14} /> Export Draft
+            </button>
+          )}
+          <div className="text-right">
+            <span className="text-[10px] text-gray-500 uppercase tracking-wider">Total Value</span>
+            <div className="text-xl font-bold text-blue-600">৳ {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
+          </div>
         </div>
       </div>
 
@@ -630,9 +909,8 @@ export default function AddDraftSale() {
       )}
 
       <form onSubmit={handleSubmit} className="bg-white border border-gray-300 overflow-hidden">
-        {/* --- ORDER HEADER (Customer + Sold By + Remarks) --- */}
+        {/* --- ORDER HEADER --- */}
         <div className="p-2 bg-gray-50 border-b border-gray-300 grid grid-cols-1 md:grid-cols-3 gap-2">
-          {/* Customer combobox with always-visible Add New button */}
           <div ref={customerDropdownRef} className="relative">
             <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider">
               Customer
@@ -714,26 +992,24 @@ export default function AddDraftSale() {
             )}
           </div>
 
-          {/* Sold By - Auto-filled with current user */}
           <div>
             <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider">
-              Sold By
+              Sold By (Auto)
             </label>
             <div className="w-full bg-gray-100 border border-gray-300 rounded p-1 text-sm text-gray-800">
               {currentUser ? (
-                <span>{currentUser.full_name || currentUser.username}</span>
+                <span>{currentUser.full_name || currentUser.username || currentUser.first_name || "User"}</span>
               ) : (
                 <span className="text-gray-400">Loading user...</span>
               )}
             </div>
             {currentUser && (
               <div className="mt-0.5 text-[9px] text-gray-400">
-                ID: {currentUser.id}
+                ID: {currentUser.id} • {currentUser.email || "No email"}
               </div>
             )}
           </div>
 
-          {/* Remarks */}
           <div>
             <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider">
               Remarks
@@ -750,7 +1026,7 @@ export default function AddDraftSale() {
         </div>
 
         {/* --- ENTRY MODE TOGGLE --- */}
-        <div className="bg-gray-50 border-b border-gray-300 px-3 py-1.5 flex gap-2">
+        <div className="bg-gray-50 border-b border-gray-300 px-3 py-1.5 flex gap-2 flex-wrap items-center">
           <button
             type="button"
             onClick={() => setEntryMode("manual")}
@@ -775,7 +1051,38 @@ export default function AddDraftSale() {
           >
             <FiLayers size={14} /> Batch by Brand
           </button>
-          {isEditing && <span className="text-xs text-gray-500 ml-2">(Brand mode disabled for editing)</span>}
+          
+          {/* Excel Import Button - Always visible in manual mode */}
+          {entryMode === "manual" && (
+            <div className="ml-auto flex items-center gap-2">
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleExcelImport}
+                accept=".xlsx,.xls"
+                className="hidden"
+                id="excel-upload-draft"
+              />
+              <label
+                htmlFor="excel-upload-draft"
+                className="flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded border border-green-300 bg-green-50 text-green-700 hover:bg-green-100 cursor-pointer transition"
+              >
+                <FiUpload size={14} /> Import Excel
+              </label>
+              <button
+                type="button"
+                onClick={handleDownloadTemplate}
+                className="flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 cursor-pointer transition"
+              >
+                <FiDownload size={14} /> Template
+              </button>
+              <span className="text-[9px] text-gray-400">(Part No, Qty)</span>
+            </div>
+          )}
+          
+          {isEditing && entryMode === "brand" && (
+            <span className="text-xs text-gray-500 ml-2">(Brand mode disabled for editing)</span>
+          )}
         </div>
 
         {/* --- BRAND SELECTOR --- */}
@@ -1121,7 +1428,7 @@ export default function AddDraftSale() {
 
         {/* --- ADD ROW BUTTON (Manual only) --- */}
         {entryMode === "manual" && (
-          <div className="p-2 border-t border-gray-200">
+          <div className="p-2 border-t border-gray-200 flex justify-between items-center">
             <button
               type="button"
               onClick={() =>
@@ -1139,6 +1446,9 @@ export default function AddDraftSale() {
             >
               <FiPlus size={14} /> Add Row
             </button>
+            <div className="text-[10px] text-gray-400">
+              <span className="font-medium">Tip:</span> Import Excel to add multiple products at once
+            </div>
           </div>
         )}
 

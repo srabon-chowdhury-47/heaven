@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useParams } from "react-router-dom";
 import axiosInstance from "../../../api/axios";
 import { userService } from "../../../api/user";
 import {
@@ -19,7 +19,11 @@ import {
 
 export default function AddSale() {
   const navigate = useNavigate();
+  const { id } = useParams();
+  const isEditing = !!id;
+
   const [loading, setLoading] = useState(false);
+  const [fetchingSale, setFetchingSale] = useState(isEditing);
   const [error, setError] = useState("");
 
   // --- CORE DATA STATES ---
@@ -89,30 +93,31 @@ export default function AddSale() {
   // --- Load Current User ---
   const loadCurrentUser = async (usersData) => {
     try {
-      // First try to get from localStorage using userService
       const storedUser = userService.getCurrentUserFromStorage();
       if (storedUser && storedUser.id) {
         const user = usersData?.find(u => u.id === storedUser.id);
         if (user) {
           setCurrentUser(user);
-          setOrderData(prev => ({
-            ...prev,
-            sold_by: user.id
-          }));
+          if (!isEditing) {
+            setOrderData(prev => ({
+              ...prev,
+              sold_by: user.id
+            }));
+          }
           return;
         }
       }
 
-      // If not in localStorage, try to fetch from API
       try {
         const user = await userService.getCurrentUser();
         if (user && user.id) {
           setCurrentUser(user);
-          setOrderData(prev => ({
-            ...prev,
-            sold_by: user.id
-          }));
-          // Store in localStorage for future use
+          if (!isEditing) {
+            setOrderData(prev => ({
+              ...prev,
+              sold_by: user.id
+            }));
+          }
           localStorage.setItem('user', JSON.stringify(user));
           return;
         }
@@ -120,17 +125,108 @@ export default function AddSale() {
         console.error("Failed to fetch current user from API", err);
       }
 
-      // Fallback: try to get from users list
       if (usersData && usersData.length > 0) {
         const firstUser = usersData[0];
         setCurrentUser(firstUser);
-        setOrderData(prev => ({
-          ...prev,
-          sold_by: firstUser.id
-        }));
+        if (!isEditing) {
+          setOrderData(prev => ({
+            ...prev,
+            sold_by: firstUser.id
+          }));
+        }
       }
     } catch (err) {
       console.error("Error loading current user:", err);
+    }
+  };
+
+  // --- FETCH SALE DATA FOR EDITING ---
+  const fetchSaleData = async () => {
+    try {
+      const response = await axiosInstance.get(`sale/sales/${id}/`);
+      const sale = response.data;
+
+      // Set the current user as the sold_by when editing
+      const soldBy = currentUser?.id || sale.sold_by || "";
+
+      setOrderData({
+        customer: sale.customer || "",
+        sold_by: soldBy,
+        payment_status: sale.payment_status || "Paid",
+        remarks: sale.remarks || "",
+      });
+
+      // Set customer name for display
+      if (sale.customer) {
+        const cust = customers.find((c) => String(c.id) === String(sale.customer));
+        if (cust) {
+          const displayName = cust.shop_name || cust.proprietor_name || cust.name || "Unknown";
+          setSelectedCustomerName(displayName);
+          setSelectedCustomerDisplayName(displayName);
+          setCustomerSearchTerm(displayName);
+        }
+      }
+
+      if (sale.items && sale.items.length > 0) {
+        const items = sale.items.map((item) => {
+          // Find the product - try multiple ways
+          let product = products.find((p) => String(p.id) === String(item.product));
+          
+          if (!product && item.product_id) {
+            product = products.find((p) => String(p.id) === String(item.product_id));
+          }
+          
+          if (!product && item.product_name) {
+            product = products.find((p) => 
+              (p.product_name || p.name || "").toLowerCase() === item.product_name.toLowerCase()
+            );
+          }
+
+          const partNumber = product?.part_number || "";
+          const productName = item.product_name || product?.product_name || product?.name || "";
+          const searchText = partNumber ? `${partNumber} - ${productName}` : productName;
+          
+          // IMPORTANT: Get purchase price from product
+          const purchasePrice = product?.purchase_cost_bdt || 0;
+
+          let multiplier = item.multiplier || "";
+          if (!multiplier && purchasePrice > 0 && parseFloat(item.unit_price_bdt) > 0) {
+            const salePrice = parseFloat(item.unit_price_bdt);
+            multiplier = (salePrice / purchasePrice).toFixed(2);
+          }
+
+          return {
+            product: item.product,
+            purchase_price_bdt: purchasePrice,
+            multiplier: multiplier,
+            unit_price_bdt: parseFloat(item.unit_price_bdt).toFixed(2),
+            quantity: item.quantity,
+            search: searchText,
+            showDropdown: false,
+          };
+        });
+        
+        setManualItems(items);
+        // Add an empty row at the end
+        setManualItems((prev) => [...prev, { 
+          product: "", 
+          purchase_price_bdt: "", 
+          multiplier: "", 
+          unit_price_bdt: "", 
+          quantity: "", 
+          search: "", 
+          showDropdown: false 
+        }]);
+      }
+
+      setFetchingSale(false);
+    } catch (err) {
+      console.error("Failed to fetch sale", err);
+      setError("Could not load sale for editing. The sale may not exist or you may not have permission.");
+      setFetchingSale(false);
+      setTimeout(() => {
+        navigate("/dashboard/sales");
+      }, 2000);
     }
   };
 
@@ -147,22 +243,32 @@ export default function AddSale() {
           axiosInstance.get("users/users/"),
         ]);
 
-        setProducts(prodRes.data.results || prodRes.data);
+        const productsData = prodRes.data.results || prodRes.data;
+        setProducts(productsData);
         setEmployees(empRes.data.results || empRes.data);
         setCustomers(custRes.data.results || custRes.data);
         setBrands(brandRes.data.results || brandRes.data);
         setStocks(stockRes.data.results || stockRes.data);
         setUsers(usersRes.data || []);
 
-        // Load current user
         await loadCurrentUser(usersRes.data);
       } catch (err) {
         console.error("Failed to fetch data", err);
         setError("Warning: Could not load initial data. Check server connection.");
+        setFetchingSale(false);
       }
     };
     fetchData();
-  }, []);
+  }, [id]);
+
+  // --- SEPARATE USEFFECT FOR FETCHING SALE DATA (LIKE DRAFT SALE) ---
+  useEffect(() => {
+    if (!isEditing) return;
+    if (products.length === 0) return;
+    if (customers.length === 0) return;
+
+    fetchSaleData();
+  }, [isEditing, products, customers]);
 
   // --- Debounced customer search ---
   useEffect(() => {
@@ -305,17 +411,14 @@ export default function AddSale() {
       }
     } else if (field === "multiplier") {
       newItems[index].multiplier = value;
-      // Auto-calculate sale price from purchase price and multiplier
       const salePrice = calculateSalePrice(newItems[index].purchase_price_bdt, value);
       newItems[index].unit_price_bdt = salePrice;
     } else if (field === "unit_price_bdt") {
       newItems[index].unit_price_bdt = value;
-      // Auto-calculate multiplier from purchase price and sale price
       const multiplier = calculateMultiplier(newItems[index].purchase_price_bdt, value);
       newItems[index].multiplier = multiplier;
     } else if (field === "purchase_price_bdt") {
       newItems[index].purchase_price_bdt = value;
-      // Recalculate sale price if multiplier exists
       if (newItems[index].multiplier) {
         const salePrice = calculateSalePrice(value, newItems[index].multiplier);
         newItems[index].unit_price_bdt = salePrice;
@@ -531,7 +634,6 @@ export default function AddSale() {
       const searchText = partNumber ? `${partNumber} - ${productName}` : productName;
       const purchasePrice = product?.purchase_cost_bdt || 0;
       
-      // Get multiplier from the item data or calculate it
       let multiplier = item.multiplier || "";
       if (!multiplier && purchasePrice > 0 && parseFloat(item.unit_price_bdt) > 0) {
         const salePrice = parseFloat(item.unit_price_bdt);
@@ -575,7 +677,9 @@ export default function AddSale() {
     setLoading(true);
     setError("");
 
-    if (!orderData.sold_by) {
+    // Ensure sold_by is set to current user
+    const soldBy = currentUser?.id || orderData.sold_by;
+    if (!soldBy) {
       setError("Please select the Employee making this sale.");
       setLoading(false);
       return;
@@ -599,9 +703,10 @@ export default function AddSale() {
     }
 
     const payload = {
-      ...orderData,
       customer: orderData.customer ? parseInt(orderData.customer) : null,
-      sold_by: parseInt(orderData.sold_by),
+      sold_by: parseInt(soldBy),
+      payment_status: orderData.payment_status || "Paid",
+      remarks: orderData.remarks || "",
       items: itemsToSubmit.map((item) => ({
         product: item.product,
         quantity: parseInt(item.quantity, 10),
@@ -611,14 +716,26 @@ export default function AddSale() {
     };
 
     try {
-      await axiosInstance.post("sale/sales/", payload);
-      navigate("/dashboard/payments");
+      if (isEditing) {
+        await axiosInstance.put(`sale/sales/${id}/`, payload);
+      } else {
+        await axiosInstance.post("sale/sales/", payload);
+      }
+      navigate("/dashboard/sales");
     } catch (err) {
       console.error(err);
       setError(err.response?.data?.detail || "Failed to process sale. Check stock levels and inputs.");
       setLoading(false);
     }
   };
+
+  if (fetchingSale) {
+    return (
+      <div className="max-w-7xl mx-auto p-3 bg-gray-50 min-h-screen flex justify-center items-center">
+        <p className="text-gray-500">Loading sale...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto p-3 bg-gray-50 min-h-screen">
@@ -632,18 +749,20 @@ export default function AddSale() {
             <FiArrowLeft size={18} />
           </button>
           <h1 className="text-xl font-bold flex items-center gap-2">
-            <FiShoppingCart className="text-green-600" /> New Sale Order
+            <FiShoppingCart className="text-green-600" /> {isEditing ? "Edit Sale Order" : "New Sale Order"}
           </h1>
-          <button
-            type="button"
-            onClick={() => {
-              setShowDraftModal(true);
-              fetchDrafts();
-            }}
-            className="ml-2 flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded border border-blue-700 transition"
-          >
-            <FiUpload size={14} /> Import Draft
-          </button>
+          {!isEditing && (
+            <button
+              type="button"
+              onClick={() => {
+                setShowDraftModal(true);
+                fetchDrafts();
+              }}
+              className="ml-2 flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded border border-blue-700 transition"
+            >
+              <FiUpload size={14} /> Import Draft
+            </button>
+          )}
         </div>
         <div className="text-right">
           <span className="text-[10px] text-gray-500 uppercase tracking-wider">Total Value</span>
@@ -724,7 +843,6 @@ export default function AddSale() {
                   </div>
                 )}
               </div>
-              {/* Always-visible Add New Customer button */}
               <button
                 type="button"
                 onClick={() => {
@@ -796,29 +914,32 @@ export default function AddSale() {
           <button
             type="button"
             onClick={() => setEntryMode("manual")}
+            disabled={isEditing}
             className={`flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded border transition ${
               entryMode === "manual"
                 ? "bg-green-100 text-green-800 border-green-300"
                 : "bg-white text-gray-600 border-gray-300 hover:bg-gray-100"
-            }`}
+            } ${isEditing ? "opacity-50 cursor-not-allowed" : ""}`}
           >
             <FiEdit2 size={14} /> Manual
           </button>
           <button
             type="button"
             onClick={() => setEntryMode("brand")}
+            disabled={isEditing}
             className={`flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded border transition ${
               entryMode === "brand"
                 ? "bg-green-100 text-green-800 border-green-300"
                 : "bg-white text-gray-600 border-gray-300 hover:bg-gray-100"
-            }`}
+            } ${isEditing ? "opacity-50 cursor-not-allowed" : ""}`}
           >
             <FiLayers size={14} /> Batch by Brand
           </button>
+          {isEditing && <span className="text-xs text-gray-500 ml-2">(Mode switching disabled for editing)</span>}
         </div>
 
         {/* --- BRAND SELECTOR --- */}
-        {entryMode === "brand" && (
+        {!isEditing && entryMode === "brand" && (
           <div className="bg-green-50/50 border-b border-gray-300 px-3 py-2 flex flex-col md:flex-row md:items-center justify-between gap-2">
             <div className="flex-1 max-w-sm">
               <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
@@ -906,7 +1027,7 @@ export default function AddSale() {
               </tr>
             </thead>
             <tbody>
-              {entryMode === "brand" &&
+              {!isEditing && entryMode === "brand" &&
                 brandItems.map((item, index) => (
                   <tr key={item.product} className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}>
                     <td className="border border-gray-300 px-2 py-1.5 text-center text-xs text-gray-500">{index + 1}</td>
@@ -1173,7 +1294,7 @@ export default function AddSale() {
                   );
                 })}
 
-              {entryMode === "brand" && brandItems.length === 0 && (
+              {!isEditing && entryMode === "brand" && brandItems.length === 0 && (
                 <tr>
                   <td colSpan="9" className="border border-gray-300 px-3 py-4 text-center text-gray-400 text-sm">
                     Use the brand selector above to load products.
@@ -1223,7 +1344,7 @@ export default function AddSale() {
               loading ? "bg-green-400 cursor-not-allowed" : "bg-green-600 hover:bg-green-700"
             }`}
           >
-            {loading ? "Processing..." : "Complete Sale"}
+            {loading ? "Processing..." : isEditing ? "Update Sale" : "Complete Sale"}
           </button>
         </div>
       </form>
@@ -1363,7 +1484,7 @@ export default function AddSale() {
       )}
 
       {/* --- DRAFT IMPORT MODAL --- */}
-      {showDraftModal && (
+      {!isEditing && showDraftModal && (
         <div className="fixed inset-0 bg-black/60 flex justify-center items-center z-50 p-3">
           <div className="bg-white border border-gray-300 w-full max-w-3xl max-h-[90vh] flex flex-col rounded-lg">
             <div className="bg-gray-100 border-b border-gray-300 px-4 py-2 flex justify-between items-center shrink-0">

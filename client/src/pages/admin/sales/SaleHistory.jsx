@@ -12,6 +12,7 @@ import {
   FiDollarSign,
   FiCalendar,
   FiList,
+  FiEdit2,
 } from "react-icons/fi";
 
 export default function SaleHistory() {
@@ -21,7 +22,7 @@ export default function SaleHistory() {
   const [customers, setCustomers] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [brands, setBrands] = useState([]);
-  const [users, setUsers] = useState([]); // Add users state
+  const [users, setUsers] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -45,7 +46,7 @@ export default function SaleHistory() {
         axiosInstance.get("person/customers/"),
         axiosInstance.get("person/employees/"),
         axiosInstance.get("brand/brands/"),
-        axiosInstance.get("users/users/"), // Fetch users
+        axiosInstance.get("users/users/"),
       ]);
 
       setSales(saleRes.data.results || saleRes.data);
@@ -53,7 +54,7 @@ export default function SaleHistory() {
       setCustomers(custRes.data.results || custRes.data);
       setEmployees(empRes.data.results || empRes.data);
       setBrands(brandRes.data.results || brandRes.data);
-      setUsers(usersRes.data || []); // Set users
+      setUsers(usersRes.data || []);
       setLoading(false);
     } catch (err) {
       console.error(err);
@@ -72,13 +73,11 @@ export default function SaleHistory() {
   const getEmployeeName = (id) => {
     if (!id) return "Unknown";
     
-    // First try to find in users
     const user = users.find((u) => String(u.id) === String(id));
     if (user) {
       return user.full_name || user.username || `User #${user.id}`;
     }
     
-    // Fallback to employees
     const emp = employees.find((e) => String(e.id) === String(id));
     if (!emp) return "Unknown";
     return emp.first_name
@@ -86,7 +85,6 @@ export default function SaleHistory() {
       : emp.full_name || emp.name || emp.employee_id;
   };
 
-  // Helper to get part number from product
   const getProductPartNumber = (item) => {
     if (!item) return "N/A";
     let product = products.find((p) => String(p.id) === String(item.product));
@@ -115,6 +113,11 @@ export default function SaleHistory() {
   // --- VIEW SALE (Navigate to detailed view) ---
   const handleViewSale = (saleId) => {
     navigate(`/dashboard/sales/view/${saleId}`);
+  };
+
+  // --- Navigate to Edit Page ---
+  const handleEditSale = (saleId) => {
+    navigate(`/dashboard/sales/edit/${saleId}`);
   };
 
   // --- EDIT / VIEW (Modal) ---
@@ -353,9 +356,16 @@ export default function SaleHistory() {
                               <FiEye size={15} />
                             </button>
                             <button
+                              onClick={() => handleEditSale(sale.id)}
+                              className="text-indigo-600 hover:text-indigo-800 transition p-0.5"
+                              title="Edit Sale"
+                            >
+                              <FiEdit2 size={15} />
+                            </button>
+                            <button
                               onClick={() => openEditModal(sale)}
                               className="text-green-600 hover:text-green-800 transition p-0.5"
-                              title="Quick Edit"
+                              title="Quick Update Status"
                             >
                               <FiSave size={15} />
                             </button>
@@ -406,7 +416,7 @@ export default function SaleHistory() {
 
             {/* Body (scrollable) */}
             <div className="overflow-y-auto flex-1 p-4 space-y-4">
-              {/* Products Table – with SL, Part Number + Product Name */}
+              {/* Products Table */}
               <div>
                 <h3 className="text-[11px] font-bold text-gray-600 uppercase tracking-wider mb-1">
                   Products Sold
@@ -471,7 +481,7 @@ export default function SaleHistory() {
                 </div>
               </div>
 
-              {/* Logistics Form – only payment_status and remarks are editable */}
+              {/* Logistics Form */}
               <form id="editForm" onSubmit={handleEditSubmit}>
                 <h3 className="text-[11px] font-bold text-gray-600 uppercase tracking-wider mb-1">
                   Update Logistics

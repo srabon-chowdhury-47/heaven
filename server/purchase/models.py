@@ -1,23 +1,20 @@
+# purchase/models.py
 import uuid
 from django.db import models
 from products.models import Product
-from person.models import Employee
 from supplier.models import Supplier
 
 class PurchaseOrder(models.Model):
     # Master Record
     po_number = models.CharField(max_length=20, unique=True, editable=False)
-    entry_by = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, related_name='purchases_logged')
+    entry_by = models.CharField(max_length=100, blank=True, null=True)  # Changed to CharField
     supplier = models.ForeignKey(Supplier, on_delete=models.PROTECT, related_name='purchase_orders', null=True, blank=True) 
     
     purchase_date = models.DateTimeField(auto_now_add=True)
     remarks = models.TextField(blank=True, null=True)
 
     # --- Simplified Financials ---
-    # The sum of all items. Discounts and payments will be handled in the Payment App.
     total_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0.00, editable=False)
-    
-    # Just a status flag. The Payment App will change this to 'Partial' or 'Paid' later.
     payment_status = models.CharField(max_length=50, default="Unpaid")
 
     def save(self, *args, **kwargs):
@@ -39,8 +36,20 @@ class PurchaseItem(models.Model):
     total_cost_bdt = models.DecimalField(max_digits=14, decimal_places=2, editable=False)
 
     def save(self, *args, **kwargs):
+        # Calculate total cost
         self.total_cost_bdt = float(self.unit_cost_bdt) * float(self.quantity)
+        
+        # Save the purchase item
         super().save(*args, **kwargs)
+        
+        # 🔥 UPDATE PRODUCT PURCHASE COST 🔥
+        try:
+            product = self.product
+            # Update the product's purchase cost with the new unit cost
+            product.purchase_cost_bdt = self.unit_cost_bdt
+            product.save(update_fields=['purchase_cost_bdt'])
+        except Product.DoesNotExist:
+            pass  # Product might have been deleted
 
     def __str__(self):
         return f"{self.quantity}x {self.product.product_name}"

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import axiosInstance from "../../../api/axios";
 import {
   FiPlus,
@@ -12,14 +12,17 @@ import {
   FiDollarSign,
   FiCalendar,
   FiList,
+  FiEdit2,
 } from "react-icons/fi";
 
 export default function PurchaseHistory() {
+  const navigate = useNavigate();
   const [purchases, setPurchases] = useState([]);
   const [products, setProducts] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [brands, setBrands] = useState([]);
+  const [users, setUsers] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -37,12 +40,13 @@ export default function PurchaseHistory() {
 
   const fetchData = async () => {
     try {
-      const [purRes, prodRes, supRes, empRes, brandRes] = await Promise.all([
+      const [purRes, prodRes, supRes, empRes, brandRes, usersRes] = await Promise.all([
         axiosInstance.get("purchase/purchases/"),
         axiosInstance.get("products/"),
         axiosInstance.get("supplier/suppliers/"),
         axiosInstance.get("person/employees/"),
         axiosInstance.get("brand/brands/"),
+        axiosInstance.get("users/users/"),
       ]);
 
       setPurchases(purRes.data.results || purRes.data);
@@ -50,6 +54,7 @@ export default function PurchaseHistory() {
       setSuppliers(supRes.data.results || supRes.data);
       setEmployees(empRes.data.results || empRes.data);
       setBrands(brandRes.data.results || brandRes.data);
+      setUsers(usersRes.data || []);
       setLoading(false);
     } catch (err) {
       console.error(err);
@@ -67,6 +72,14 @@ export default function PurchaseHistory() {
 
   const getEmployeeName = (id) => {
     if (!id) return "Unknown";
+    
+    // First try to find in users
+    const user = users.find((u) => String(u.id) === String(id));
+    if (user) {
+      return user.full_name || user.username || user.first_name || `User #${user.id}`;
+    }
+    
+    // Fallback to employees
     const emp = employees.find((e) => String(e.id) === String(id));
     if (!emp) return "Unknown";
     return emp.first_name
@@ -159,6 +172,11 @@ export default function PurchaseHistory() {
         alert("Failed to delete purchase. Check server logs.");
       }
     }
+  };
+
+  // --- Navigate to Edit Page ---
+  const handleEditPurchase = (purchaseId) => {
+    navigate(`/dashboard/purchase/edit/${purchaseId}`);
   };
 
   // --- FILTER ---
@@ -339,11 +357,18 @@ export default function PurchaseHistory() {
                         <td className="border border-gray-300 px-2 py-1.5 text-center">
                           <div className="flex justify-center items-center gap-1">
                             <button
-                              onClick={() => openEditModal(purchase)}
+                              onClick={() => handleEditPurchase(purchase.id)}
                               className="text-blue-600 hover:text-blue-800 transition p-0.5"
-                              title="View / Edit"
+                              title="Edit Purchase"
                             >
-                              <FiEye size={15} />
+                              <FiEdit2 size={15} />
+                            </button>
+                            <button
+                              onClick={() => openEditModal(purchase)}
+                              className="text-green-600 hover:text-green-800 transition p-0.5"
+                              title="Quick Update Status"
+                            >
+                              <FiSave size={15} />
                             </button>
                             <button
                               onClick={() => handleDelete(purchase.id)}
@@ -467,11 +492,16 @@ export default function PurchaseHistory() {
                   </div>
                   <div>
                     <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
-                      Entry By (Employee)
+                      Entry By
                     </label>
                     <p className="text-sm font-medium text-gray-800">
                       {getEmployeeName(editFormData.entry_by)}
                     </p>
+                    {editFormData.entry_by && (
+                      <div className="text-[9px] text-gray-400">
+                        ID: {editFormData.entry_by}
+                      </div>
+                    )}
                   </div>
                   <div>
                     <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
