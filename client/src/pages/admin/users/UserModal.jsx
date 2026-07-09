@@ -76,10 +76,9 @@ const UserModal = ({ isOpen, onClose, onSave, user, mode, currentUser }) => {
     }
 
     if (mode === 'create') {
+      // Password is required but no minimum length restriction
       if (!formData.password) {
         newErrors.password = 'Password is required';
-      } else if (formData.password.length < 8) {
-        newErrors.password = 'Password must be at least 8 characters';
       }
       
       if (formData.password !== formData.confirm_password) {
