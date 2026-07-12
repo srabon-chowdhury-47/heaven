@@ -721,7 +721,7 @@ export default function AddSale() {
       } else {
         await axiosInstance.post("sale/sales/", payload);
       }
-      navigate("/dashboard/sales");
+      navigate("/dashboard/payments");
     } catch (err) {
       console.error(err);
       setError(err.response?.data?.detail || "Failed to process sale. Check stock levels and inputs.");
