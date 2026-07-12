@@ -190,7 +190,7 @@ export default function AdminSidebar() {
       id: "users", type: "dropdown", label: "Users", icon: FiUsers, stateKey: "users",
       subItems: [
         { to: "/dashboard/users", label: "User Management", icon: FiUser },
-        { to: "/dashboard/users/add", label: "Add New User", icon: FiUserPlus },
+      
       ]
     },
     // --- FINANCE --- (Only for admins)

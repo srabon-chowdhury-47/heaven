@@ -12,7 +12,7 @@ import Dashboard from "./pages/admin/Dashboard";
 
 // User Management Pages
 import UserManagement from "./pages/admin/users/UserManagement";
-import AddUser from "./pages/admin/users/AddUser";
+
 
 // Admin Pages
 import EmployeeManage from "./pages/admin/employee/EmployeeList";
@@ -61,7 +61,7 @@ export const router = createBrowserRouter([
       { index: true, element: <Dashboard /> },
       
       // User Management Routes - More specific routes FIRST
-      { path: "users/add", element: <AddUser /> },  // This must come BEFORE "users"
+      // This must come BEFORE "users"
       { path: "users", element: <UserManagement /> },  // This comes AFTER specific routes
 
       // Employee Routes
