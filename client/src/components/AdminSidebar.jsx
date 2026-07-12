@@ -1,4 +1,3 @@
-// client/src/components/AdminSidebar.jsx
 import { useState, useEffect } from "react";
 import { Link, useNavigate, useLocation } from "react-router-dom";
 import {
@@ -177,6 +176,7 @@ export default function AdminSidebar() {
       subItems: [
         { to: "/dashboard/payments", label: "Payment Center", icon: FiDollarSign },
         { to: "/dashboard/payment-history", label: "Payment Ledger", icon: FiList },
+        { to: "/dashboard/customers/ledger", label: "Customer Ledger", icon: FiUsers }, // 👈 NEW
       ]
     },
     { id: "stock", type: "link", to: "/dashboard/stock", label: "Live Stock", icon: FiBox },

@@ -26,6 +26,8 @@ export default function Payments() {
   const [selectedOrderId, setSelectedOrderId] = useState("");
   const [activeOrder, setActiveOrder] = useState(null);
   const [orderSummary, setOrderSummary] = useState({ total: 0, paid: 0, due: 0 });
+  const [customerBalance, setCustomerBalance] = useState(null); // overall ledger balance
+  const [netPayable, setNetPayable] = useState(null); // due after credit
 
   // Modal State
   const [selectedPaymentDetails, setSelectedPaymentDetails] = useState(null);
@@ -63,7 +65,6 @@ export default function Payments() {
   // Load current user from localStorage or API
   const loadCurrentUser = async () => {
     try {
-      // First try to get from localStorage using userService
       const storedUser = userService.getCurrentUserFromStorage();
       if (storedUser && storedUser.id) {
         setCurrentUser(storedUser);
@@ -74,7 +75,6 @@ export default function Payments() {
         return;
       }
 
-      // If not in localStorage, try to fetch from API
       try {
         const user = await userService.getCurrentUser();
         if (user && user.id) {
@@ -83,12 +83,10 @@ export default function Payments() {
             ...prev,
             handled_by: user.id.toString()
           }));
-          // Store in localStorage for future use
           localStorage.setItem('user', JSON.stringify(user));
         }
       } catch (err) {
         console.error("Failed to fetch current user from API", err);
-        // Fallback: try to get from users list if available
         if (users.length > 0) {
           const firstUser = users[0];
           setCurrentUser(firstUser);
@@ -118,7 +116,6 @@ export default function Payments() {
       const usersData = res.data || [];
       setUsers(usersData);
 
-      // If current user is not set yet and we have users, try to find the current user
       if (!currentUser && usersData.length > 0) {
         const storedUser = userService.getCurrentUserFromStorage();
         if (storedUser && storedUser.id) {
@@ -167,39 +164,82 @@ export default function Payments() {
     setSelectedOrderId("");
     setActiveOrder(null);
     setOrderSummary({ total: 0, paid: 0, due: 0 });
-    // Keep the handled_by value when changing type
-    setFormData((prev) => ({ 
-      ...initialFormState, 
+    setCustomerBalance(null);
+    setNetPayable(null);
+    setFormData((prev) => ({
+      ...initialFormState,
       handled_by: prev.handled_by,
-      payment_method: prev.payment_method 
+      payment_method: prev.payment_method
     }));
   }, [type]);
 
+  // Calculate due and also fetch customer balance using transactions (same as ledger)
   useEffect(() => {
     if (selectedOrderId) {
-      calculateDue(selectedOrderId);
+      calculateDueAndBalance(selectedOrderId);
       const order = orders.find((o) => o.id.toString() === selectedOrderId.toString());
       setActiveOrder(order || null);
     } else {
       setActiveOrder(null);
+      setCustomerBalance(null);
+      setNetPayable(null);
     }
   }, [selectedOrderId, recentPayments, orders]);
 
-  const calculateDue = (orderId) => {
+  const calculateDueAndBalance = async (orderId) => {
     const order = orders.find((o) => o.id.toString() === orderId.toString());
     if (!order) return;
 
+    // Compute order-specific due
     const total = parseFloat(order.total_amount || 0);
     const relatedPayments = recentPayments.filter((p) => {
       if (type === "IN") return p.sale?.toString() === orderId.toString();
       return p.purchase?.toString() === orderId.toString();
     });
-
-    const paid = relatedPayments.reduce((sum, p) => sum + parseFloat(p.amount), 0);
+    const paid = relatedPayments.reduce((sum, p) => sum + parseFloat(p.amount || 0), 0);
     const due = total - paid;
-
     setOrderSummary({ total, paid, due });
-    setFormData((prev) => ({ ...prev, amount: due.toFixed(2) }));
+
+    // Get customer ID (handle both object and primitive)
+    const customerId = order.customer?.id || order.customer || order.customer_id;
+    if (customerId) {
+      try {
+        // Fetch all transactions for this customer (same as CustomerLedger)
+        const transRes = await axiosInstance.get(
+          `/customerledger/transactions/customer/${customerId}/transactions/`
+        );
+        const txns = transRes.data || [];
+        let balance = 0;
+        if (txns.length > 0) {
+          // Use the running_balance of the last transaction
+          balance = parseFloat(txns[txns.length - 1].running_balance) || 0;
+        } else {
+          // Fallback: try the balance endpoint
+          const balRes = await axiosInstance.get(
+            `/customerledger/transactions/customer/${customerId}/balance/`
+          );
+          balance = parseFloat(balRes.data?.balance ?? balRes.data ?? 0) || 0;
+        }
+        setCustomerBalance(balance);
+
+        // Credit = positive balance (customer has overpaid)
+        const credit = balance > 0 ? balance : 0;
+        const net = due - credit;
+        const netValue = net > 0 ? net : 0;
+        setNetPayable(netValue);
+        setFormData((prev) => ({ ...prev, amount: netValue.toFixed(2) }));
+      } catch (err) {
+        console.error("Failed to fetch customer balance", err);
+        setCustomerBalance(null);
+        setNetPayable(due);
+        setFormData((prev) => ({ ...prev, amount: due.toFixed(2) }));
+      }
+    } else {
+      // No customer (walk-in) – just use order due
+      setCustomerBalance(null);
+      setNetPayable(due);
+      setFormData((prev) => ({ ...prev, amount: due.toFixed(2) }));
+    }
   };
 
   const handleInputChange = (e) => {
@@ -210,8 +250,6 @@ export default function Payments() {
     e.preventDefault();
     if (!selectedOrderId || !formData.amount)
       return alert("Select an order and enter an amount.");
-    if (parseFloat(formData.amount) > orderSummary.due)
-      return alert("Amount cannot exceed total due.");
 
     setIsSubmitting(true);
     try {
@@ -235,9 +273,9 @@ export default function Payments() {
       await fetchOrders();
 
       setSelectedOrderId("");
-      setFormData((prev) => ({ 
-        ...initialFormState, 
-        handled_by: prev.handled_by // Keep the user selected
+      setFormData((prev) => ({
+        ...initialFormState,
+        handled_by: prev.handled_by
       }));
       alert("Payment recorded successfully!");
     } catch (err) {
@@ -255,7 +293,6 @@ export default function Payments() {
     if (user) {
       return user.full_name || user.username || user.first_name || `User #${user.id}`;
     }
-    // Fallback to employees if not found in users
     const emp = employees.find((e) => String(e.id) === String(userId));
     if (emp) {
       return emp.full_name || emp.name || emp.first_name || `Employee #${emp.id}`;
@@ -365,6 +402,8 @@ export default function Payments() {
                       ? `Customer: ${activeOrder.customer_name || "Walk-in"}`
                       : `Supplier ID: ${activeOrder.supplier}`}
                   </div>
+
+                  {/* Order items (short) */}
                   {activeOrder.items && activeOrder.items.length > 0 && (
                     <div className="mb-1.5">
                       <p className="text-[10px] font-bold text-gray-500 uppercase flex items-center">
@@ -382,9 +421,11 @@ export default function Payments() {
                       </ul>
                     </div>
                   )}
+
+                  {/* Financial summary */}
                   <div className="grid grid-cols-3 gap-1 text-center pt-1.5 border-t border-gray-200 text-xs">
                     <div>
-                      <p className="text-[10px] text-gray-500 uppercase">Total</p>
+                      <p className="text-[10px] text-gray-500 uppercase">Order Total</p>
                       <p className="font-bold text-gray-900">৳{orderSummary.total.toFixed(2)}</p>
                     </div>
                     <div>
@@ -392,10 +433,38 @@ export default function Payments() {
                       <p className="font-bold text-green-600">৳{orderSummary.paid.toFixed(2)}</p>
                     </div>
                     <div>
-                      <p className="text-[10px] text-gray-500 uppercase">Due</p>
+                      <p className="text-[10px] text-gray-500 uppercase">Order Due</p>
                       <p className="font-bold text-red-600">৳{orderSummary.due.toFixed(2)}</p>
                     </div>
                   </div>
+
+                  {/* Customer ledger balance (now fetched from transactions) */}
+                  {customerBalance !== null && !isNaN(customerBalance) && (
+                    <div className="mt-2 p-1.5 bg-blue-50 border border-blue-200 rounded text-xs">
+                      <div className="flex justify-between">
+                        <span className="text-gray-600">Customer Balance (Ledger):</span>
+                        <span className={`font-bold ${customerBalance > 0 ? 'text-green-600' : customerBalance < 0 ? 'text-red-600' : 'text-gray-600'}`}>
+                          ৳{customerBalance.toFixed(2)}
+                        </span>
+                      </div>
+                      {customerBalance > 0 && (
+                        <>
+                          <div className="text-green-700 text-[10px] mt-0.5">
+                            * Credit available – net payable adjusted below.
+                          </div>
+                          <div className="text-yellow-700 text-[9px] mt-0.5">
+                            ⚠️ Order will remain "Partial" until credit is officially applied.
+                          </div>
+                        </>
+                      )}
+                      {netPayable !== null && !isNaN(netPayable) && netPayable !== orderSummary.due && (
+                        <div className="flex justify-between mt-0.5 border-t border-blue-200 pt-0.5">
+                          <span className="text-gray-600">Net Payable (after credit):</span>
+                          <span className="font-bold text-indigo-700">৳{netPayable.toFixed(2)}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -849,7 +918,7 @@ export default function Payments() {
               <div>
                 <p className="text-[10px] text-gray-500 uppercase font-semibold">Processed By</p>
                 <p className="font-medium text-gray-800">
-                  {selectedPaymentDetails.handled_by 
+                  {selectedPaymentDetails.handled_by
                     ? getUserName(selectedPaymentDetails.handled_by)
                     : "Unknown"}
                 </p>

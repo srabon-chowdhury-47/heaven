@@ -13,7 +13,6 @@ import Dashboard from "./pages/admin/Dashboard";
 // User Management Pages
 import UserManagement from "./pages/admin/users/UserManagement";
 
-
 // Admin Pages
 import EmployeeManage from "./pages/admin/employee/EmployeeList";
 import CustomerManage from "./pages/admin/customer/CustomerList";
@@ -36,6 +35,7 @@ import ViewPaymentdetails from './pages/admin/payment/ViewPaymentdetails';
 import CapitalEntries from './pages/admin/finance/CapitalEntries';
 import ExpenseList from "./pages/admin/finance/ExpenseList";
 import AddExpense from "./pages/admin/finance/AddExpense";
+import CustomerLedger from './pages/admin/customer/CustomerLedger';
 
 // Finance Pages
 import FinancialDashboard from "./pages/admin/finance/FinancialDashboard";
@@ -62,14 +62,16 @@ export const router = createBrowserRouter([
       
       // User Management Routes - More specific routes FIRST
       // This must come BEFORE "users"
-      { path: "users", element: <UserManagement /> },  // This comes AFTER specific routes
+      { path: "users", element: <UserManagement /> },
 
       // Employee Routes
       { path: "employees", element: <EmployeeManage /> },
       { path: "employees/add", element: <AddEmployee /> },
       { path: "employees/edit/:id", element: <AddEmployee /> },
 
-      // Customer Routes
+      // Customer Routes – specific ledger routes before generic ones
+      { path: "customers/ledger", element: <CustomerLedger /> },
+      { path: "customers/:id/ledger", element: <CustomerLedger /> },
       { path: "customers", element: <CustomerManage /> },
       { path: "customers/add", element: <AddCustomer /> },
       { path: "customers/edit/:id", element: <AddCustomer /> },
