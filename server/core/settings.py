@@ -57,6 +57,7 @@ INSTALLED_APPS = [
     'expense',
     'account.apps.AccountConfig',
     'user',
+    'customerLedger',
 ]
 
 MIDDLEWARE = [
