@@ -26,7 +26,8 @@ class Payment(models.Model):
     
     amount = models.DecimalField(max_digits=12, decimal_places=2)
     payment_method = models.CharField(max_length=20, choices=METHOD_CHOICES, default='Cash')
-    handled_by = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True)
+    handled_by = models.CharField(max_length=100, blank=True, null=True, 
+                               help_text="Name of the person who made the payment")
     
     # --- BANK SPECIFI FIELDS ---
     bank_account_number = models.CharField(max_length=50, blank=True, null=True)

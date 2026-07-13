@@ -18,7 +18,6 @@ import {
 export default function Payments() {
   const [type, setType] = useState("IN");
   const [orders, setOrders] = useState([]);
-  const [employees, setEmployees] = useState([]);
   const [users, setUsers] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
   const [recentPayments, setRecentPayments] = useState([]);
@@ -26,8 +25,8 @@ export default function Payments() {
   const [selectedOrderId, setSelectedOrderId] = useState("");
   const [activeOrder, setActiveOrder] = useState(null);
   const [orderSummary, setOrderSummary] = useState({ total: 0, paid: 0, due: 0 });
-  const [customerBalance, setCustomerBalance] = useState(null); // overall ledger balance
-  const [netPayable, setNetPayable] = useState(null); // due after credit
+  const [customerBalance, setCustomerBalance] = useState(null);
+  const [netPayable, setNetPayable] = useState(null);
 
   // Modal State
   const [selectedPaymentDetails, setSelectedPaymentDetails] = useState(null);
@@ -55,60 +54,46 @@ export default function Payments() {
   const isBank = formData.payment_method === "Bank";
   const isMFS = ["Bkash", "Nagad", "Rocket"].includes(formData.payment_method);
 
-  useEffect(() => {
-    fetchEmployees();
-    fetchUsers();
-    fetchRecentPayments();
-    loadCurrentUser();
-  }, []);
-
-  // Load current user from localStorage or API
+  // ── Load current user ──
   const loadCurrentUser = async () => {
     try {
+      // Try localStorage first
       const storedUser = userService.getCurrentUserFromStorage();
       if (storedUser && storedUser.id) {
         setCurrentUser(storedUser);
-        setFormData((prev) => ({
-          ...prev,
-          handled_by: storedUser.id.toString()
-        }));
+        setFormData((prev) => ({ ...prev, handled_by: storedUser.id.toString() }));
         return;
       }
 
+      // Fetch from API
       try {
         const user = await userService.getCurrentUser();
         if (user && user.id) {
           setCurrentUser(user);
-          setFormData((prev) => ({
-            ...prev,
-            handled_by: user.id.toString()
-          }));
-          localStorage.setItem('user', JSON.stringify(user));
+          localStorage.setItem("user", JSON.stringify(user));
+          setFormData((prev) => ({ ...prev, handled_by: user.id.toString() }));
+          return;
         }
       } catch (err) {
         console.error("Failed to fetch current user from API", err);
-        if (users.length > 0) {
-          const firstUser = users[0];
-          setCurrentUser(firstUser);
-          setFormData((prev) => ({
-            ...prev,
-            handled_by: firstUser.id.toString()
-          }));
-        }
+      }
+
+      // Fallback: if users list is already loaded, use the first
+      if (users.length > 0) {
+        const firstUser = users[0];
+        setCurrentUser(firstUser);
+        setFormData((prev) => ({ ...prev, handled_by: firstUser.id.toString() }));
       }
     } catch (err) {
       console.error("Error loading current user:", err);
     }
   };
 
-  const fetchEmployees = async () => {
-    try {
-      const res = await axiosInstance.get("person/employees/");
-      setEmployees(res.data.results || res.data);
-    } catch (err) {
-      console.error("Failed to fetch employees", err);
-    }
-  };
+  useEffect(() => {
+    fetchUsers();
+    fetchRecentPayments();
+    loadCurrentUser();
+  }, []);
 
   const fetchUsers = async () => {
     try {
@@ -116,18 +101,21 @@ export default function Payments() {
       const usersData = res.data || [];
       setUsers(usersData);
 
-      if (!currentUser && usersData.length > 0) {
+      // If currentUser not set, try to set from localStorage or first user
+      if (!currentUser) {
         const storedUser = userService.getCurrentUserFromStorage();
         if (storedUser && storedUser.id) {
           const user = usersData.find((u) => u.id === storedUser.id);
           if (user) {
             setCurrentUser(user);
-            setFormData((prev) => ({
-              ...prev,
-              handled_by: user.id.toString()
-            }));
+            setFormData((prev) => ({ ...prev, handled_by: user.id.toString() }));
             return;
           }
+        }
+        if (usersData.length > 0) {
+          const firstUser = usersData[0];
+          setCurrentUser(firstUser);
+          setFormData((prev) => ({ ...prev, handled_by: firstUser.id.toString() }));
         }
       }
     } catch (err) {
@@ -169,11 +157,10 @@ export default function Payments() {
     setFormData((prev) => ({
       ...initialFormState,
       handled_by: prev.handled_by,
-      payment_method: prev.payment_method
+      payment_method: prev.payment_method,
     }));
   }, [type]);
 
-  // Calculate due and also fetch customer balance using transactions (same as ledger)
   useEffect(() => {
     if (selectedOrderId) {
       calculateDueAndBalance(selectedOrderId);
@@ -190,7 +177,6 @@ export default function Payments() {
     const order = orders.find((o) => o.id.toString() === orderId.toString());
     if (!order) return;
 
-    // Compute order-specific due
     const total = parseFloat(order.total_amount || 0);
     const relatedPayments = recentPayments.filter((p) => {
       if (type === "IN") return p.sale?.toString() === orderId.toString();
@@ -200,21 +186,17 @@ export default function Payments() {
     const due = total - paid;
     setOrderSummary({ total, paid, due });
 
-    // Get customer ID (handle both object and primitive)
     const customerId = order.customer?.id || order.customer || order.customer_id;
     if (customerId) {
       try {
-        // Fetch all transactions for this customer (same as CustomerLedger)
         const transRes = await axiosInstance.get(
           `/customerledger/transactions/customer/${customerId}/transactions/`
         );
         const txns = transRes.data || [];
         let balance = 0;
         if (txns.length > 0) {
-          // Use the running_balance of the last transaction
           balance = parseFloat(txns[txns.length - 1].running_balance) || 0;
         } else {
-          // Fallback: try the balance endpoint
           const balRes = await axiosInstance.get(
             `/customerledger/transactions/customer/${customerId}/balance/`
           );
@@ -222,7 +204,6 @@ export default function Payments() {
         }
         setCustomerBalance(balance);
 
-        // Credit = positive balance (customer has overpaid)
         const credit = balance > 0 ? balance : 0;
         const net = due - credit;
         const netValue = net > 0 ? net : 0;
@@ -235,7 +216,6 @@ export default function Payments() {
         setFormData((prev) => ({ ...prev, amount: due.toFixed(2) }));
       }
     } else {
-      // No customer (walk-in) – just use order due
       setCustomerBalance(null);
       setNetPayable(due);
       setFormData((prev) => ({ ...prev, amount: due.toFixed(2) }));
@@ -246,26 +226,53 @@ export default function Payments() {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
+  // ── handleSubmit: use currentUser.id for handled_by ──
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!selectedOrderId || !formData.amount)
-      return alert("Select an order and enter an amount.");
+    if (!selectedOrderId || !formData.amount) {
+      alert("Select an order and enter an amount.");
+      return;
+    }
+
+    if (!currentUser || !currentUser.id) {
+      alert("No logged-in user found. Please log in again.");
+      return;
+    }
 
     setIsSubmitting(true);
     try {
-      const payload = { ...formData, payment_type: type };
+      const payload = {
+        amount: parseFloat(formData.amount),
+        payment_method: formData.payment_method,
+        payment_type: type,
+        handled_by: currentUser.id, // user ID
+        remarks: formData.remarks || "",
+        transaction_id: formData.transaction_id || null,
+      };
 
-      if (!isBank) {
-        payload.bank_account_number = null;
-        payload.bank_account_name = null;
-        payload.bank_name = null;
-        payload.bank_branch_name = null;
-        payload.bank_routing_number = null;
+      if (type === "IN") payload.sale = parseInt(selectedOrderId, 10);
+      if (type === "OUT") payload.purchase = parseInt(selectedOrderId, 10);
+
+      if (isBank) {
+        payload.bank_account_number = formData.bank_account_number || null;
+        payload.bank_account_name = formData.bank_account_name || null;
+        payload.bank_name = formData.bank_name || null;
+        payload.bank_branch_name = formData.bank_branch_name || null;
+        payload.bank_routing_number = formData.bank_routing_number || null;
       }
-      if (!isMFS) payload.mfs_mobile_number = null;
 
-      if (type === "IN") payload.sale = selectedOrderId;
-      if (type === "OUT") payload.purchase = selectedOrderId;
+      if (isMFS) {
+        payload.mfs_mobile_number = formData.mfs_mobile_number || null;
+      }
+
+      // Remove null/undefined fields
+      Object.keys(payload).forEach((key) => {
+        if (payload[key] === null || payload[key] === undefined) {
+          delete payload[key];
+        }
+      });
+
+      console.log("Submitting payment payload:", payload);
 
       await axiosInstance.post("payment/payments/", payload);
 
@@ -275,32 +282,28 @@ export default function Payments() {
       setSelectedOrderId("");
       setFormData((prev) => ({
         ...initialFormState,
-        handled_by: prev.handled_by
+        handled_by: prev.handled_by,
       }));
       alert("Payment recorded successfully!");
     } catch (err) {
       console.error("Payment failed", err);
-      alert("Failed to process payment.");
+      const errorMsg = err.response?.data || "Failed to process payment.";
+      alert(`Error: ${JSON.stringify(errorMsg)}`);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Get user name by ID
+  // Get user name by ID (from users list)
   const getUserName = (userId) => {
     if (!userId) return "Unknown";
     const user = users.find((u) => String(u.id) === String(userId));
     if (user) {
       return user.full_name || user.username || user.first_name || `User #${user.id}`;
     }
-    const emp = employees.find((e) => String(e.id) === String(userId));
-    if (emp) {
-      return emp.full_name || emp.name || emp.first_name || `Employee #${emp.id}`;
-    }
     return "Unknown";
   };
 
-  // Fetch order details when viewing payment
   const openViewModal = async (payment) => {
     setSelectedPaymentDetails(payment);
     setOrderDetails(null);
@@ -403,7 +406,6 @@ export default function Payments() {
                       : `Supplier ID: ${activeOrder.supplier}`}
                   </div>
 
-                  {/* Order items (short) */}
                   {activeOrder.items && activeOrder.items.length > 0 && (
                     <div className="mb-1.5">
                       <p className="text-[10px] font-bold text-gray-500 uppercase flex items-center">
@@ -422,7 +424,6 @@ export default function Payments() {
                     </div>
                   )}
 
-                  {/* Financial summary */}
                   <div className="grid grid-cols-3 gap-1 text-center pt-1.5 border-t border-gray-200 text-xs">
                     <div>
                       <p className="text-[10px] text-gray-500 uppercase">Order Total</p>
@@ -438,7 +439,6 @@ export default function Payments() {
                     </div>
                   </div>
 
-                  {/* Customer ledger balance (now fetched from transactions) */}
                   {customerBalance !== null && !isNaN(customerBalance) && (
                     <div className="mt-2 p-1.5 bg-blue-50 border border-blue-200 rounded text-xs">
                       <div className="flex justify-between">
@@ -602,7 +602,7 @@ export default function Payments() {
                 </div>
                 {currentUser && (
                   <div className="mt-0.5 text-[9px] text-gray-400">
-                    ID: {currentUser.id} • {currentUser.email || "No email"}
+                    User ID: {currentUser.id} • {currentUser.email || "No email"}
                   </div>
                 )}
               </div>
@@ -622,7 +622,7 @@ export default function Payments() {
 
               <button
                 type="submit"
-                disabled={isSubmitting || !selectedOrderId}
+                disabled={isSubmitting || !selectedOrderId || !currentUser}
                 className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 rounded text-sm transition disabled:opacity-50 disabled:cursor-not-allowed flex justify-center items-center gap-2"
               >
                 {isSubmitting ? "Processing..." : `Process ${type === "IN" ? "Receipt" : "Payment"}`}
@@ -742,11 +742,10 @@ export default function Payments() {
         </div>
       </div>
 
-      {/* --- PAYMENT DETAILS MODAL (with Order Items) --- */}
+      {/* ─── PAYMENT DETAILS MODAL ─── */}
       {selectedPaymentDetails && (
         <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50 p-3">
           <div className="bg-white w-full max-w-2xl rounded-lg border border-gray-300 overflow-hidden max-h-[90vh] flex flex-col">
-            {/* Modal Header */}
             <div className="bg-gray-100 border-b border-gray-300 px-4 py-2 flex justify-between items-center">
               <h3 className="font-bold text-gray-800 flex items-center gap-2 text-sm">
                 <FiFileText className="text-indigo-600" />
@@ -760,9 +759,7 @@ export default function Payments() {
               </button>
             </div>
 
-            {/* Modal Body */}
             <div className="overflow-y-auto flex-1 p-4 space-y-3 text-sm">
-              {/* Payment Info */}
               <div className="grid grid-cols-2 gap-3 border-b border-gray-200 pb-2">
                 <div>
                   <p className="text-[10px] text-gray-500 uppercase font-semibold">Payment ID</p>
@@ -799,7 +796,6 @@ export default function Payments() {
                 </div>
               </div>
 
-              {/* Order Details (Buyer/Supplier & Items) */}
               <div className="border border-gray-200 rounded bg-gray-50 p-2.5">
                 <div className="flex items-center gap-2 mb-1.5">
                   <FiUser className="text-indigo-500" size={14} />
@@ -818,7 +814,6 @@ export default function Payments() {
                         ? orderDetails.customer_name || "Walk-in"
                         : orderDetails.supplier_name || `Supplier ID: ${orderDetails.supplier}`}
                     </p>
-
                     <div className="border-t border-gray-200 pt-2 mt-1">
                       <p className="text-[10px] text-gray-500 uppercase font-bold flex items-center gap-1 mb-1">
                         <FiShoppingBag size={12} /> Items
@@ -864,51 +859,25 @@ export default function Payments() {
                 )}
               </div>
 
-              {/* Payment Method Details */}
               <div className="border border-gray-200 bg-gray-50 rounded p-2.5 space-y-1">
                 <p className="text-[10px] text-gray-500 uppercase font-bold">
                   Method: <span className="text-gray-800">{selectedPaymentDetails.payment_method}</span>
                 </p>
-
                 {selectedPaymentDetails.payment_method === "Bank" && (
                   <div className="grid grid-cols-2 gap-1 text-xs">
-                    <p>
-                      <span className="text-gray-500">Bank:</span>{" "}
-                      {selectedPaymentDetails.bank_name || "—"}
-                    </p>
-                    <p>
-                      <span className="text-gray-500">A/C Name:</span>{" "}
-                      {selectedPaymentDetails.bank_account_name || "—"}
-                    </p>
-                    <p className="col-span-2">
-                      <span className="text-gray-500">A/C No:</span>{" "}
-                      <span className="font-mono">
-                        {selectedPaymentDetails.bank_account_number || "—"}
-                      </span>
-                    </p>
+                    <p><span className="text-gray-500">Bank:</span> {selectedPaymentDetails.bank_name || "—"}</p>
+                    <p><span className="text-gray-500">A/C Name:</span> {selectedPaymentDetails.bank_account_name || "—"}</p>
+                    <p className="col-span-2"><span className="text-gray-500">A/C No:</span> <span className="font-mono">{selectedPaymentDetails.bank_account_number || "—"}</span></p>
                     {selectedPaymentDetails.bank_branch_name && (
-                      <p className="col-span-2">
-                        <span className="text-gray-500">Branch:</span>{" "}
-                        {selectedPaymentDetails.bank_branch_name}
-                      </p>
+                      <p className="col-span-2"><span className="text-gray-500">Branch:</span> {selectedPaymentDetails.bank_branch_name}</p>
                     )}
                   </div>
                 )}
-
                 {["Bkash", "Nagad", "Rocket"].includes(selectedPaymentDetails.payment_method) && (
-                  <p>
-                    <span className="text-gray-500">Mobile No:</span>{" "}
-                    <span className="font-mono font-bold">
-                      {selectedPaymentDetails.mfs_mobile_number || "—"}
-                    </span>
-                  </p>
+                  <p><span className="text-gray-500">Mobile No:</span> <span className="font-mono font-bold">{selectedPaymentDetails.mfs_mobile_number || "—"}</span></p>
                 )}
-
                 {selectedPaymentDetails.transaction_id && (
-                  <p>
-                    <span className="text-gray-500">Transaction ID:</span>{" "}
-                    <span className="font-mono">{selectedPaymentDetails.transaction_id}</span>
-                  </p>
+                  <p><span className="text-gray-500">Transaction ID:</span> <span className="font-mono">{selectedPaymentDetails.transaction_id}</span></p>
                 )}
                 {selectedPaymentDetails.payment_method === "Cash" && (
                   <p className="text-gray-500 italic text-xs">Standard Hand Cash</p>
@@ -918,9 +887,7 @@ export default function Payments() {
               <div>
                 <p className="text-[10px] text-gray-500 uppercase font-semibold">Processed By</p>
                 <p className="font-medium text-gray-800">
-                  {selectedPaymentDetails.handled_by
-                    ? getUserName(selectedPaymentDetails.handled_by)
-                    : "Unknown"}
+                  {selectedPaymentDetails.handled_by ? getUserName(selectedPaymentDetails.handled_by) : "Unknown"}
                 </p>
               </div>
 
@@ -934,7 +901,6 @@ export default function Payments() {
               )}
             </div>
 
-            {/* Modal Footer */}
             <div className="bg-gray-50 border-t border-gray-200 px-4 py-2 text-right">
               <button
                 onClick={() => setSelectedPaymentDetails(null)}
