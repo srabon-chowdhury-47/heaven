@@ -179,6 +179,11 @@ export default function PurchaseHistory() {
     navigate(`/dashboard/purchase/edit/${purchaseId}`);
   };
 
+  // --- Navigate to View Page ---
+  const handleViewPurchase = (purchaseId) => {
+    navigate(`/dashboard/purchase/view/${purchaseId}`);
+  };
+
   // --- FILTER ---
   const filteredPurchases = purchases.filter((p) => {
     const supName = getSupplierName(p.supplier).toLowerCase();
@@ -356,6 +361,15 @@ export default function PurchaseHistory() {
                         </td>
                         <td className="border border-gray-300 px-2 py-1.5 text-center">
                           <div className="flex justify-center items-center gap-1">
+                            {/* View */}
+                            <button
+                              onClick={() => handleViewPurchase(purchase.id)}
+                              className="text-gray-500 hover:text-blue-600 transition p-0.5"
+                              title="View Details"
+                            >
+                              <FiEye size={15} />
+                            </button>
+                            {/* Edit (navigate) */}
                             <button
                               onClick={() => handleEditPurchase(purchase.id)}
                               className="text-blue-600 hover:text-blue-800 transition p-0.5"
@@ -363,6 +377,7 @@ export default function PurchaseHistory() {
                             >
                               <FiEdit2 size={15} />
                             </button>
+                            {/* Quick Update Status */}
                             <button
                               onClick={() => openEditModal(purchase)}
                               className="text-green-600 hover:text-green-800 transition p-0.5"
@@ -370,6 +385,7 @@ export default function PurchaseHistory() {
                             >
                               <FiSave size={15} />
                             </button>
+                            {/* Delete */}
                             <button
                               onClick={() => handleDelete(purchase.id)}
                               className="text-gray-400 hover:text-red-600 transition p-0.5"

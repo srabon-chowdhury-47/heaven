@@ -211,6 +211,7 @@ export default function ProductList() {
               <th className="px-3 py-2 font-semibold">Part Number</th>
               <th className="px-3 py-2 font-semibold">Name & Details</th>
               <th className="px-3 py-2 font-semibold">Source/Status</th>
+              <th className="px-3 py-2 font-semibold text-center">Weight (kg)</th>   {/* NEW COLUMN */}
               <th className="px-3 py-2 font-semibold text-right">Cost (৳)</th>
               <th className="px-3 py-2 font-semibold text-right">Retail (৳)</th>
               <th className="px-3 py-2 font-semibold text-center w-24">Actions</th>
@@ -218,7 +219,7 @@ export default function ProductList() {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {visibleProducts.length === 0 ? (
-              <tr><td colSpan="7" className="p-6 text-center text-gray-500 text-xs">No matching products found.</td></tr>
+              <tr><td colSpan="8" className="p-6 text-center text-gray-500 text-xs">No matching products found.</td></tr>
             ) : (
               visibleProducts.map((product) => (
                 <tr key={product.id} className="hover:bg-gray-50 transition-colors">
@@ -242,6 +243,9 @@ export default function ProductList() {
                     <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider inline-block ${product.product_status === 'Active' ? 'bg-green-100 text-green-700' : product.product_status === 'Damaged' ? 'bg-red-100 text-red-700' : 'bg-gray-200 text-gray-600'}`}>
                       {product.product_status}
                     </span>
+                  </td>
+                  <td className="px-3 py-1.5 text-center font-mono text-gray-700">
+                    {product.weight ? `${product.weight}` : '-'}
                   </td>
                   <td className="px-3 py-1.5 font-mono text-right text-gray-600">{parseFloat(product.purchase_cost_bdt || 0).toFixed(2)}</td>
                   <td className="px-3 py-1.5 font-mono text-right font-bold text-gray-800">{parseFloat(product.retail_price_bdt || 0).toFixed(2)}</td>
@@ -299,6 +303,8 @@ export default function ProductList() {
                   <div><span className="block text-[9px] text-gray-400 uppercase">Barcode</span><span className="font-mono">{selectedProduct.barcode || "-"}</span></div>
                   <div><span className="block text-[9px] text-gray-400 uppercase">Primary Unit</span><span>{selectedProduct.unit}</span></div>
                   <div><span className="block text-[9px] text-gray-400 uppercase">Alt Units</span><span>{selectedProduct.alternative_units || "-"}</span></div>
+                  {/* NEW: Weight field */}
+                  <div><span className="block text-[9px] text-gray-400 uppercase">Weight (kg)</span><span>{selectedProduct.weight ? `${selectedProduct.weight}` : "-"}</span></div>
                 </div>
               </section>
 

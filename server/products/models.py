@@ -9,6 +9,7 @@ class Product(models.Model):
     product_name = models.CharField(max_length=255, null=True, blank=True, help_text="Full descriptive name")
     brand = models.ForeignKey(Brand, on_delete=models.SET_NULL, null=True, blank=True, related_name='products', help_text="Select the Brand (e.g., Yamaha, Suzuki)")
     category = models.CharField(max_length=100, null=True, blank=True, help_text="Category > Sub-Category hierarchy")
+    weight = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Weight in kg or g")
 
     # --- 2. Sourcing & Import Details ---
     SOURCE_CHOICES = [

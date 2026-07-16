@@ -36,6 +36,7 @@ import CapitalEntries from './pages/admin/finance/CapitalEntries';
 import ExpenseList from "./pages/admin/finance/ExpenseList";
 import AddExpense from "./pages/admin/finance/AddExpense";
 import CustomerLedger from './pages/admin/customer/CustomerLedger';
+import ViewPurchase from './pages/admin/purchase/ViewPurchase';
 
 // Finance Pages
 import FinancialDashboard from "./pages/admin/finance/FinancialDashboard";
@@ -85,6 +86,7 @@ export const router = createBrowserRouter([
       { path: "purchase", element: <PurchaseHistory /> },
       { path: "purchase/add", element: <AddPurchase /> },
       { path: "purchase/edit/:id", element: <AddPurchase /> },
+      { path: "purchase/view/:id", element: <ViewPurchase /> },
 
       // Stock Routes
       { path: "stock", element: <StockList /> },

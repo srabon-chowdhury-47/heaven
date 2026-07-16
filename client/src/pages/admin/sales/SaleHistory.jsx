@@ -362,6 +362,16 @@ export default function SaleHistory() {
                             >
                               <FiEdit2 size={15} />
                             </button>
+                            {/* 🔽 NEW PAY BUTTON (only for unpaid) */}
+                            {sale.payment_status !== "Paid" && (
+                              <Link
+                                to={`/dashboard/payments?saleId=${sale.id}`}
+                                className="text-green-600 hover:text-green-800 transition p-0.5"
+                                title="Make Payment"
+                              >
+                                <FiDollarSign size={15} />
+                              </Link>
+                            )}
                             <button
                               onClick={() => openEditModal(sale)}
                               className="text-green-600 hover:text-green-800 transition p-0.5"

@@ -4,7 +4,7 @@ from .models import Product
 class ProductAdmin(admin.ModelAdmin):
     # --- 1. The Master Table View (All Fields Visible) ---
     list_display = (
-        'product_id', 'part_number', 'product_name', 'brand', 'category', 
+        'product_id', 'part_number', 'product_name', 'brand', 'weight', 'category', 
         'source', 'product_status', 'stock_status',
         'purchase_cost_bdt', 'wholesale_price_bdt', 'retail_price_bdt', 
         'mrp_inr', 'markup_percentage', 

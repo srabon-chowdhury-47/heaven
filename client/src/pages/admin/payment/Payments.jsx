@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { useLocation } from "react-router-dom";
 import axiosInstance from "../../../api/axios";
 import { userService } from "../../../api/user";
 import {
@@ -13,9 +14,15 @@ import {
   FiUser,
   FiShoppingBag,
   FiLoader,
+  FiSearch,
+  FiChevronRight,
+  FiChevronDown,
 } from "react-icons/fi";
 
 export default function Payments() {
+  const location = useLocation();
+  const saleIdParam = new URLSearchParams(location.search).get('saleId');
+
   const [type, setType] = useState("IN");
   const [orders, setOrders] = useState([]);
   const [users, setUsers] = useState([]);
@@ -27,6 +34,11 @@ export default function Payments() {
   const [orderSummary, setOrderSummary] = useState({ total: 0, paid: 0, due: 0 });
   const [customerBalance, setCustomerBalance] = useState(null);
   const [netPayable, setNetPayable] = useState(null);
+
+  // Search state
+  const [searchTerm, setSearchTerm] = useState("");
+  // Load more state
+  const [showAll, setShowAll] = useState(false);
 
   // Modal State
   const [selectedPaymentDetails, setSelectedPaymentDetails] = useState(null);
@@ -57,7 +69,6 @@ export default function Payments() {
   // ── Load current user ──
   const loadCurrentUser = async () => {
     try {
-      // Try localStorage first
       const storedUser = userService.getCurrentUserFromStorage();
       if (storedUser && storedUser.id) {
         setCurrentUser(storedUser);
@@ -65,7 +76,6 @@ export default function Payments() {
         return;
       }
 
-      // Fetch from API
       try {
         const user = await userService.getCurrentUser();
         if (user && user.id) {
@@ -78,7 +88,6 @@ export default function Payments() {
         console.error("Failed to fetch current user from API", err);
       }
 
-      // Fallback: if users list is already loaded, use the first
       if (users.length > 0) {
         const firstUser = users[0];
         setCurrentUser(firstUser);
@@ -101,7 +110,6 @@ export default function Payments() {
       const usersData = res.data || [];
       setUsers(usersData);
 
-      // If currentUser not set, try to set from localStorage or first user
       if (!currentUser) {
         const storedUser = userService.getCurrentUserFromStorage();
         if (storedUser && storedUser.id) {
@@ -132,6 +140,7 @@ export default function Payments() {
     }
   };
 
+  // ── Fetch orders & sort latest first ──
   const fetchOrders = async () => {
     setLoading(true);
     try {
@@ -139,7 +148,14 @@ export default function Payments() {
       const res = await axiosInstance.get(endpoint);
       const allOrders = res.data.results || res.data;
       const pendingOrders = allOrders.filter((o) => o.payment_status !== "Paid");
-      setOrders(pendingOrders);
+      const sorted = pendingOrders.sort((a, b) => {
+        const dateA = a.created_at ? new Date(a.created_at) : new Date(0);
+        const dateB = b.created_at ? new Date(b.created_at) : new Date(0);
+        return dateB - dateA;
+      });
+      setOrders(sorted);
+      // Reset showAll when orders refresh
+      setShowAll(false);
     } catch (err) {
       console.error("Failed to fetch orders", err);
     } finally {
@@ -147,6 +163,38 @@ export default function Payments() {
     }
   };
 
+  // ── Filter orders based on search term ──
+  const filteredOrders = orders.filter((order) => {
+    const term = searchTerm.toLowerCase().trim();
+    if (!term) return true;
+    const customerField = type === "IN" ? order.customer_name : order.supplier_name;
+    const refField = type === "IN" ? order.invoice_number : order.po_number;
+    return (
+      (customerField && customerField.toLowerCase().includes(term)) ||
+      (refField && refField.toLowerCase().includes(term))
+    );
+  });
+
+  // ── Determine which orders to display ──
+  const getDisplayedOrders = () => {
+    if (searchTerm.trim() !== "") {
+      // When searching, show all matches (ignore showAll)
+      return filteredOrders;
+    }
+    // No search: show limited unless showAll is true
+    return showAll ? filteredOrders : filteredOrders.slice(0, 3);
+  };
+
+  const displayedOrders = getDisplayedOrders();
+
+  // Reset showAll when search term changes
+  useEffect(() => {
+    if (searchTerm.trim() !== "") {
+      setShowAll(false);
+    }
+  }, [searchTerm]);
+
+  // Reset showAll when type changes (already done in fetchOrders)
   useEffect(() => {
     fetchOrders();
     setSelectedOrderId("");
@@ -154,12 +202,24 @@ export default function Payments() {
     setOrderSummary({ total: 0, paid: 0, due: 0 });
     setCustomerBalance(null);
     setNetPayable(null);
+    setSearchTerm("");
+    setShowAll(false);
     setFormData((prev) => ({
       ...initialFormState,
       handled_by: prev.handled_by,
       payment_method: prev.payment_method,
     }));
   }, [type]);
+
+  // ── AUTO‑SELECT SALE FROM QUERY PARAM ──
+  useEffect(() => {
+    if (saleIdParam && orders.length > 0 && !selectedOrderId) {
+      const found = orders.find((o) => o.id.toString() === saleIdParam.toString());
+      if (found) {
+        setSelectedOrderId(saleIdParam.toString());
+      }
+    }
+  }, [saleIdParam, orders, selectedOrderId]);
 
   useEffect(() => {
     if (selectedOrderId) {
@@ -226,7 +286,6 @@ export default function Payments() {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
-  // ── handleSubmit: use currentUser.id for handled_by ──
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!selectedOrderId || !formData.amount) {
@@ -245,7 +304,7 @@ export default function Payments() {
         amount: parseFloat(formData.amount),
         payment_method: formData.payment_method,
         payment_type: type,
-        handled_by: currentUser.id, // user ID
+        handled_by: currentUser.id,
         remarks: formData.remarks || "",
         transaction_id: formData.transaction_id || null,
       };
@@ -265,7 +324,6 @@ export default function Payments() {
         payload.mfs_mobile_number = formData.mfs_mobile_number || null;
       }
 
-      // Remove null/undefined fields
       Object.keys(payload).forEach((key) => {
         if (payload[key] === null || payload[key] === undefined) {
           delete payload[key];
@@ -294,7 +352,6 @@ export default function Payments() {
     }
   };
 
-  // Get user name by ID (from users list)
   const getUserName = (userId) => {
     if (!userId) return "Unknown";
     const user = users.find((u) => String(u.id) === String(userId));
@@ -378,25 +435,106 @@ export default function Payments() {
             </div>
 
             <form onSubmit={handleSubmit} className="space-y-3">
+              {/* Search Input */}
               <div>
-                <label className="block text-[11px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5">
-                  Select {type === "IN" ? "Sale Invoice" : "Purchase Order"}
+                <label className="block text-[11px] font-semibold text-gray-600 uppercase tracking-wider mb-0.5 flex items-center gap-1">
+                  <FiSearch size={12} />
+                  Search {type === "IN" ? "Customer / Invoice" : "Supplier / PO"}
                 </label>
-                <select
+                <input
+                  type="text"
+                  placeholder="Type to filter..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
                   className="w-full bg-white border border-gray-300 rounded p-1.5 text-sm text-gray-800 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
-                  value={selectedOrderId}
-                  onChange={(e) => setSelectedOrderId(e.target.value)}
-                  required
-                >
-                  <option value="">— Choose Pending —</option>
-                  {orders.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {type === "IN" ? o.invoice_number : o.po_number} - ৳{o.total_amount} ({o.payment_status})
-                    </option>
-                  ))}
-                </select>
+                />
               </div>
 
+              {/* ─── ORDER LIST ─── */}
+              <div>
+                <label className="block text-[11px] font-semibold text-gray-600 uppercase tracking-wider mb-1">
+                  {searchTerm.trim() !== ""
+                    ? `${filteredOrders.length} Matching ${type === "IN" ? "Invoices" : "Orders"}`
+                    : showAll
+                    ? `All ${filteredOrders.length} Pending ${type === "IN" ? "Invoices" : "Orders"}`
+                    : `Latest ${Math.min(3, filteredOrders.length)} Pending ${type === "IN" ? "Invoices" : "Orders"}`}
+                </label>
+                {loading ? (
+                  <div className="flex justify-center py-4 text-gray-400">
+                    <FiLoader className="animate-spin mr-2" /> Loading...
+                  </div>
+                ) : displayedOrders.length === 0 ? (
+                  <div className="text-center py-4 text-gray-400 text-sm border border-dashed border-gray-300 rounded">
+                    No pending orders found
+                  </div>
+                ) : (
+                  <div className="max-h-60 overflow-y-auto border border-gray-200 rounded divide-y divide-gray-100">
+                    {displayedOrders.map((order) => {
+                      const isSelected = selectedOrderId === order.id.toString();
+                      return (
+                        <div
+                          key={order.id}
+                          onClick={() => setSelectedOrderId(order.id.toString())}
+                          className={`px-3 py-2 cursor-pointer transition-colors flex justify-between items-center ${
+                            isSelected
+                              ? "bg-indigo-50 border-l-4 border-indigo-500"
+                              : "hover:bg-gray-50"
+                          }`}
+                        >
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-xs font-bold text-gray-700">
+                                {type === "IN" ? order.invoice_number : order.po_number}
+                              </span>
+                              <span className="text-[10px] bg-gray-200 px-1.5 py-0.5 rounded-full text-gray-600">
+                                {order.payment_status}
+                              </span>
+                            </div>
+                            <div className="text-xs text-gray-500 truncate">
+                              {type === "IN"
+                                ? order.customer_name || "Walk-in"
+                                : order.supplier_name || `Supplier #${order.supplier}`}
+                            </div>
+                          </div>
+                          <div className="text-right ml-2">
+                            <div className="font-bold text-sm text-gray-800">
+                              ৳{parseFloat(order.total_amount).toFixed(2)}
+                            </div>
+                            <div className="text-[10px] text-gray-400">
+                              {new Date(order.created_at).toLocaleDateString()}
+                            </div>
+                          </div>
+                          {isSelected && <FiChevronRight className="text-indigo-500 ml-1" />}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* ─── LOAD MORE BUTTON ─── */}
+                {!searchTerm.trim() && !showAll && filteredOrders.length > 3 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAll(true)}
+                    className="mt-2 w-full bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold py-1.5 rounded border border-gray-300 transition flex items-center justify-center gap-1"
+                  >
+                    <FiChevronDown size={14} />
+                    Load More ({filteredOrders.length - 3} more)
+                  </button>
+                )}
+                {!searchTerm.trim() && showAll && filteredOrders.length > 3 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowAll(false)}
+                    className="mt-2 w-full bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-semibold py-1.5 rounded border border-gray-300 transition flex items-center justify-center gap-1"
+                  >
+                    <FiChevronDown size={14} className="rotate-180" />
+                    Show Less
+                  </button>
+                )}
+              </div>
+
+              {/* Order Summary (when selected) */}
               {activeOrder && (
                 <div className="bg-gray-50 border border-gray-200 rounded p-2.5">
                   <div className="flex items-center text-xs font-semibold text-gray-700 border-b border-gray-200 pb-1.5 mb-1.5">
