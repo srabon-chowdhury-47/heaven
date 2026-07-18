@@ -58,6 +58,7 @@ INSTALLED_APPS = [
     'account.apps.AccountConfig',
     'user',
     'customerLedger',
+    'draftPurchase',
 ]
 
 MIDDLEWARE = [

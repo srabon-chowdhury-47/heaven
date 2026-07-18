@@ -22,6 +22,12 @@ import ProductList from "./pages/admin/products/ProductList";
 import AddProduct from "./pages/admin/products/AddProduct";
 import PurchaseHistory from './pages/admin/purchase/PurchaseHistory';
 import AddPurchase from './pages/admin/purchase/AddPurchase';
+import ViewPurchase from './pages/admin/purchase/ViewPurchase';
+
+// NEW: Draft Purchase imports
+import DraftPurchaseList from './pages/admin/purchase/DraftPurchaseList';
+import AddDraftPurchase from './pages/admin/purchase/AddDraftPurchase';
+
 import StockList from './pages/admin/stock/StockList';
 import SaleHistory from './pages/admin/sales/SaleHistory';
 import AddSale from './pages/admin/sales/AddSale';
@@ -36,7 +42,6 @@ import CapitalEntries from './pages/admin/finance/CapitalEntries';
 import ExpenseList from "./pages/admin/finance/ExpenseList";
 import AddExpense from "./pages/admin/finance/AddExpense";
 import CustomerLedger from './pages/admin/customer/CustomerLedger';
-import ViewPurchase from './pages/admin/purchase/ViewPurchase';
 
 // Finance Pages
 import FinancialDashboard from "./pages/admin/finance/FinancialDashboard";
@@ -51,7 +56,7 @@ export const router = createBrowserRouter([
     path: "/",
     element: <Layout />,
     children: [
-      { index: true, element: <Home /> }, 
+      { index: true, element: <Home /> },
       { path: "login", element: <Login /> },
     ],
   },
@@ -60,9 +65,8 @@ export const router = createBrowserRouter([
     element: <AdminLayout />,
     children: [
       { index: true, element: <Dashboard /> },
-      
-      // User Management Routes - More specific routes FIRST
-      // This must come BEFORE "users"
+
+      // User Management Routes
       { path: "users", element: <UserManagement /> },
 
       // Employee Routes
@@ -70,7 +74,7 @@ export const router = createBrowserRouter([
       { path: "employees/add", element: <AddEmployee /> },
       { path: "employees/edit/:id", element: <AddEmployee /> },
 
-      // Customer Routes – specific ledger routes before generic ones
+      // Customer Routes
       { path: "customers/ledger", element: <CustomerLedger /> },
       { path: "customers/:id/ledger", element: <CustomerLedger /> },
       { path: "customers", element: <CustomerManage /> },
@@ -88,6 +92,11 @@ export const router = createBrowserRouter([
       { path: "purchase/edit/:id", element: <AddPurchase /> },
       { path: "purchase/view/:id", element: <ViewPurchase /> },
 
+      // NEW: Draft Purchase Routes
+      { path: "draft-purchase", element: <DraftPurchaseList /> },
+      { path: "draft-purchase/add", element: <AddDraftPurchase /> },
+      { path: "draft-purchase/edit/:id", element: <AddDraftPurchase /> },
+
       // Stock Routes
       { path: "stock", element: <StockList /> },
 
@@ -100,12 +109,12 @@ export const router = createBrowserRouter([
       { path: "sales/draftlist", element: <DraftSaleList /> },
       { path: "sales/draft/:id/view", element: <ViewDraft /> },
       { path: "sales/view/:id", element: <ViewSale /> },
-      
+
       // Finance Routes
       { path: "finance/dashboard", element: <FinancialDashboard /> },
       { path: "finance/chart-of-accounts", element: <ChartOfAccounts /> },
       { path: "finance/capital-entries", element: <CapitalEntries /> },
-      
+
       // Expense Routes
       { path: "finance/expense", element: <ExpenseList /> },
       { path: "finance/expense/add", element: <AddExpense /> },
@@ -117,7 +126,7 @@ export const router = createBrowserRouter([
       // Payment Routes
       { path: "payments", element: <Payments /> },
       { path: "payment-history", element: <PaymentHistory /> },
-      { path: "payments/view/:id", element: <ViewPaymentdetails /> }
+      { path: "payments/view/:id", element: <ViewPaymentdetails /> },
     ],
   },
 ]);

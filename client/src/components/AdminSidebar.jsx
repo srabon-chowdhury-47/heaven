@@ -169,6 +169,9 @@ export default function AdminSidebar() {
       subItems: [
         { to: "/dashboard/purchase/add", label: "New Purchase", icon: FiPlus },
         { to: "/dashboard/purchase", label: "Purchase History", icon: FiList },
+        // NEW DRAFT PURCHASE ITEMS
+        { to: "/dashboard/draft-purchase/add", label: "New Draft Purchase", icon: FiPlus },
+        { to: "/dashboard/draft-purchase", label: "Draft Purchase List", icon: FiList },
       ]
     },
     {
