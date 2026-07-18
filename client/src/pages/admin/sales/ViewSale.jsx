@@ -1,3 +1,5 @@
+// src/pages/admin/sales/ViewSale.jsx
+
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import axiosInstance from "../../../api/axios";
@@ -15,7 +17,9 @@ import {
   FiXCircle,
   FiDownload,
   FiTrendingUp,
+  FiFile, // <-- added for Excel icon
 } from "react-icons/fi";
+import * as XLSX from "xlsx"; // <-- new import
 
 // ── Company info shown on the printed bill (edit these) ──
 const COMPANY = {
@@ -83,6 +87,7 @@ export default function ViewSale() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [printing, setPrinting] = useState(false);
+  const [exporting, setExporting] = useState(false); // <-- new state
 
   useEffect(() => {
     fetchSaleData();
@@ -244,7 +249,153 @@ export default function ViewSale() {
     return "N/A";
   };
 
-  // Print bill — layout styled like a standard computer shop invoice
+  // ── Export to Excel ──
+  const handleExportExcel = () => {
+    if (typeof XLSX === "undefined") {
+      alert("Excel export library not loaded. Please install xlsx and try again.");
+      return;
+    }
+
+    setExporting(true);
+
+    try {
+      const totals = calculateTotals();
+      const customer = getCustomerDetails(sale?.customer);
+      const previousBalance = parseFloat(sale?.previous_balance || 0);
+      const paid =
+        sale?.payment_status === "Paid"
+          ? totals.total
+          : parseFloat(sale?.paid_amount || 0);
+      const currentBalance = previousBalance + (totals.total - paid);
+
+      // Build rows as 2D array
+      const rows = [];
+
+      // ── Company Header ──
+      rows.push([COMPANY.name.toUpperCase()]);
+      rows.push([COMPANY.addressLine1]);
+      rows.push([COMPANY.phone]);
+      rows.push([COMPANY.email]);
+      rows.push([]); // blank line
+
+      // ── Invoice Title ──
+      rows.push(["INVOICE / BILL"]);
+      rows.push([
+        `NO: ${sale?.invoice_number || "N/A"}`,
+        `Date: ${formatDateShort(sale?.sale_date)}`,
+      ]);
+      rows.push([]);
+
+      // ── Customer Info ──
+      rows.push(["Customer Information"]);
+      rows.push([`Customer: ${getCustomerName(sale?.customer)}`]);
+      rows.push([`Address: ${customer ? getCustomerAddress(customer) : "N/A"}`]);
+      rows.push([`Phone: ${customer ? getCustomerPhone(customer) : "N/A"}`]);
+      rows.push([`Email: ${customer?.email || "N/A"}`]);
+      rows.push([`Salesman: ${getEmployeeName(sale?.sold_by)}`]);
+      rows.push([]);
+
+      // ── Products Table Headers ──
+      const headers = [
+        "Sl", "Part No.", "Brand", "Product Name",
+        "× (Multiplier)", "Qty", "MRP (INR)", "Price", "Total", "Profit"
+      ];
+      rows.push(headers);
+
+      // ── Product Rows ──
+      (sale?.items || []).forEach((item, idx) => {
+        const partNumber = getProductPartNumber(item);
+        const brandName = getProductBrand(item);
+        const productName = getProductName(item);
+        const mrp = parseFloat(item.mrp_inr || 0);
+        const price = parseFloat(item.unit_price_bdt || 0);
+        const total = parseFloat(item.total_price_bdt || 0);
+        const profit = parseFloat(item.profit_bdt || 0);
+        const multiplier = getMultiplierDisplay(item);
+        rows.push([
+          idx + 1,
+          partNumber,
+          brandName,
+          productName,
+          multiplier,
+          item.quantity,
+          mrp || "",
+          price,
+          total,
+          profit || "",
+        ]);
+      });
+
+      // ── Totals ──
+      rows.push([]);
+      const subtotalRow = ["", "", "", "", "", "", "", "Subtotal", totals.subtotal];
+      rows.push(subtotalRow);
+      if (totals.discount > 0) {
+        rows.push(["", "", "", "", "", "", "", "Discount", -totals.discount]);
+      }
+      const grandTotalRow = ["", "", "", "", "", "", "", "Grand Total", totals.total];
+      rows.push(grandTotalRow);
+
+      // ── Balance Fields ──
+      rows.push(["", "", "", "", "", "", "", "Previous Balance", previousBalance]);
+      rows.push(["", "", "", "", "", "", "", "Paid", paid]);
+      rows.push(["", "", "", "", "", "", "", "Current Balance", currentBalance]);
+
+      rows.push([]);
+      // ── Remarks ──
+      if (sale?.remarks) {
+        rows.push([`Remarks: ${sale.remarks}`]);
+        rows.push([]);
+      }
+
+      // ── Footer ──
+      rows.push(["✓ Good received by customer in good condition."]);
+      rows.push(["** This is a system generated bill / invoice, seal & sign are not mandatory. **"]);
+
+      // Create workbook and sheet
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+
+      // ── Column widths ──
+      ws["!cols"] = [
+        { wch: 6 },   // Sl
+        { wch: 18 },  // Part No.
+        { wch: 15 },  // Brand
+        { wch: 35 },  // Product Name
+        { wch: 12 },  // Multiplier
+        { wch: 8 },   // Qty
+        { wch: 15 },  // MRP
+        { wch: 15 },  // Price
+        { wch: 18 },  // Total
+        { wch: 15 },  // Profit
+      ];
+
+      // ── Number formatting for currency columns (columns H, I, J → 0-index: 7,8,9) ──
+      const range = XLSX.utils.decode_range(ws["!ref"]);
+      for (let R = range.s.r; R <= range.e.r; R++) {
+        for (let C = range.s.c; C <= range.e.c; C++) {
+          const addr = XLSX.utils.encode_cell({ r: R, c: C });
+          const cell = ws[addr];
+          if (!cell) continue;
+          if (typeof cell.v === "number") {
+            cell.z = "#,##0.00";
+          }
+        }
+      }
+
+      XLSX.utils.book_append_sheet(wb, ws, "Sale");
+      const fileName = `Sale_Invoice_${sale?.invoice_number || "bill"}_${new Date().toISOString().slice(0,10)}.xlsx`;
+      XLSX.writeFile(wb, fileName);
+
+    } catch (err) {
+      console.error("Excel export error:", err);
+      alert("Failed to export Excel. Please try again.");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // Print bill (unchanged)
   const handlePrint = async () => {
     setPrinting(true);
     try {
@@ -655,6 +806,14 @@ export default function ViewSale() {
         </div>
         <div className="flex gap-2">
           <button
+            onClick={handleExportExcel}
+            disabled={exporting}
+            className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded font-semibold transition disabled:opacity-50"
+          >
+            <FiFile />
+            {exporting ? "Exporting..." : "Export to Excel"}
+          </button>
+          <button
             onClick={handlePrint}
             disabled={printing}
             className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-semibold transition disabled:opacity-50"
@@ -969,6 +1128,14 @@ export default function ViewSale() {
           className="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 border border-gray-300 rounded hover:bg-gray-50"
         >
           Back to Sales
+        </button>
+        <button
+          onClick={handleExportExcel}
+          disabled={exporting}
+          className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded font-semibold transition disabled:opacity-50"
+        >
+          <FiFile />
+          {exporting ? "Exporting..." : "Export to Excel"}
         </button>
         <button
           onClick={handlePrint}
