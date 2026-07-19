@@ -12,7 +12,8 @@ class DraftPurchaseItemSerializer(serializers.ModelSerializer):
         model = DraftPurchaseItem
         fields = [
             'id', 'product', 'product_name', 'part_number', 'weight', 'hs_code',
-            'quantity', 'unit_cost_bdt', 'total_cost_bdt'
+            'quantity', 'unit_cost_bdt', 'total_cost_bdt',
+            'discount', 'duty'   # included
         ]
         read_only_fields = ['total_cost_bdt']
 
@@ -22,7 +23,7 @@ class DraftPurchaseItemSerializer(serializers.ModelSerializer):
 
 class DraftPurchaseOrderSerializer(serializers.ModelSerializer):
     items = DraftPurchaseItemSerializer(many=True)
-    entry_by_name = serializers.CharField(source='entry_by', read_only=True)  # optional
+    entry_by_name = serializers.CharField(source='entry_by', read_only=True)
 
     class Meta:
         model = DraftPurchaseOrder

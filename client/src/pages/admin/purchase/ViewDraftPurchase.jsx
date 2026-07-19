@@ -202,7 +202,7 @@ export default function ViewDraftPurchase() {
   };
 
   const formatCurrency = (amount) => {
-    return `৳ ${parseFloat(amount || 0).toFixed(2)}`;
+    return ` ${parseFloat(amount || 0).toFixed(2)}`;
   };
 
   const formatNumber = (amount) => {
@@ -676,7 +676,7 @@ export default function ViewDraftPurchase() {
           <div>
             <h1 className="text-xl font-bold flex items-center gap-2">
               <FiFileText className="text-blue-600" />
-              Draft Purchase Details
+              Product Order Sheet
             </h1>
             <p className="text-xs text-gray-500">Draft #{draft.draft_number}</p>
           </div>

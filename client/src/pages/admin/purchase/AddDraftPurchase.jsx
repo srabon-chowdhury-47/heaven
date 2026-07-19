@@ -696,7 +696,7 @@ export default function AddDraftPurchase() {
             <FiArrowLeft size={18} />
           </button>
           <h1 className="text-xl font-bold flex items-center gap-2">
-            <FiShoppingBag className="text-blue-600" /> {isEditing ? "Edit Draft Purchase" : "New Draft Purchase"}
+            <FiShoppingBag className="text-blue-600" /> {isEditing ? "Edit Draft Purchase" : "New Product Order Sheet"}
           </h1>
         </div>
         <div className="flex items-center gap-4">

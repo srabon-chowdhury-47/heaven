@@ -27,7 +27,12 @@ class DraftPurchaseItem(models.Model):
     unit_cost_bdt = models.DecimalField(max_digits=12, decimal_places=2)
     total_cost_bdt = models.DecimalField(max_digits=14, decimal_places=2, editable=False)
 
+    # NEW: Discount and Duty fields
+    discount = models.DecimalField(max_digits=5, decimal_places=2, default=0.00)
+    duty = models.DecimalField(max_digits=12, decimal_places=2, default=0.00)
+
     def save(self, *args, **kwargs):
+        # This keeps total_cost_bdt as unit_cost * quantity (ignoring discount/duty)
         self.total_cost_bdt = float(self.unit_cost_bdt) * float(self.quantity)
         super().save(*args, **kwargs)
 
