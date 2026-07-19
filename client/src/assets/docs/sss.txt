@@ -17,38 +17,6 @@ import {
 } from "react-icons/fi";
 import * as XLSX from "xlsx";
 
-// --- CALCULATION HELPERS ---
-// Current Rate = Unit Cost - (Discount% of Unit Cost)
-const calcCurrentRate = (unitCost, discountPct) => {
-  const cost = parseFloat(unitCost) || 0;
-  const disc = parseFloat(discountPct) || 0;
-  return cost - (cost * disc) / 100;
-};
-
-// Net Duty = Weight * Duty (fallback to just Duty if weight missing/zero)
-const calcNetDuty = (weight, duty) => {
-  const w = parseFloat(weight) || 0;
-  const d = parseFloat(duty) || 0;
-  return w > 0 ? w * d : d;
-};
-
-// Cost = Current Rate + Net Duty
-const calcCost = (unitCost, discountPct, weight, duty) => {
-  const currentRate = calcCurrentRate(unitCost, discountPct);
-  const netDuty = calcNetDuty(weight, duty);
-  return currentRate + netDuty;
-};
-
-const emptyManualItem = () => ({
-  product: "",
-  unit_cost_bdt: "", // Unit Cost (MRP-based base cost)
-  discount: "", // %
-  duty: "", // per unit, manual input
-  quantity: "",
-  search: "",
-  showDropdown: false,
-});
-
 export default function AddDraftPurchase() {
   const navigate = useNavigate();
   const { id } = useParams();
@@ -77,7 +45,9 @@ export default function AddDraftPurchase() {
   });
 
   // --- ITEM STATES ---
-  const [manualItems, setManualItems] = useState([emptyManualItem()]);
+  const [manualItems, setManualItems] = useState([
+    { product: "", unit_cost_bdt: "", quantity: "", search: "", showDropdown: false },
+  ]);
   const [brandItems, setBrandItems] = useState([]);
 
   // Refs for dropdown outside click handling
@@ -152,7 +122,7 @@ export default function AddDraftPurchase() {
       setUsers(usersRes.data || []);
 
       await loadCurrentUser(usersRes.data);
-
+      
       if (isEditing) {
         await fetchDraftData();
       }
@@ -183,19 +153,24 @@ export default function AddDraftPurchase() {
           const product = products.find((p) => String(p.id) === String(item.product));
           const partNumber = product?.part_number || "";
           const productName = item.product_name || product?.product_name || product?.name || "";
+          const searchText = partNumber ? `${partNumber} - ${productName}` : productName;
 
           return {
             product: item.product,
             unit_cost_bdt: parseFloat(item.unit_cost_bdt).toFixed(2),
-            discount: item.discount != null ? String(item.discount) : "",
-            duty: item.duty != null ? String(item.duty) : "",
             quantity: item.quantity,
-            search: partNumber || productName,
+            search: searchText,
             showDropdown: false,
           };
         });
         setManualItems(items);
-        setManualItems((prev) => [...prev, emptyManualItem()]);
+        setManualItems((prev) => [...prev, { 
+          product: "", 
+          unit_cost_bdt: "", 
+          quantity: "", 
+          search: "", 
+          showDropdown: false 
+        }]);
       }
 
       setFetchingDraft(false);
@@ -236,8 +211,6 @@ export default function AddDraftPurchase() {
         const partNoIndex = headers.findIndex(h => h.includes('part') || h.includes('partno'));
         const quantityIndex = headers.findIndex(h => h.includes('quantity') || h.includes('qty'));
         const mrpIndex = headers.findIndex(h => h.includes('mrp') || h.includes('price') || h.includes('cost'));
-        const discountIndex = headers.findIndex(h => h.includes('discount'));
-        const dutyIndex = headers.findIndex(h => h.includes('duty'));
 
         if (partNoIndex === -1 || quantityIndex === -1 || mrpIndex === -1) {
           setError("Excel must contain 'Part No', 'Quantity', and 'MRP' columns.");
@@ -248,8 +221,6 @@ export default function AddDraftPurchase() {
         const partNoKey = columnKeys[partNoIndex];
         const quantityKey = columnKeys[quantityIndex];
         const mrpKey = columnKeys[mrpIndex];
-        const discountKey = discountIndex !== -1 ? columnKeys[discountIndex] : null;
-        const dutyKey = dutyIndex !== -1 ? columnKeys[dutyIndex] : null;
 
         // Process each row
         const newItems = [];
@@ -259,8 +230,6 @@ export default function AddDraftPurchase() {
           const partNo = String(row[partNoKey] || "").trim();
           const quantity = parseFloat(row[quantityKey]);
           const mrp = parseFloat(row[mrpKey]);
-          const discount = discountKey ? parseFloat(row[discountKey]) : 0;
-          const duty = dutyKey ? parseFloat(row[dutyKey]) : 0;
 
           if (!partNo || isNaN(quantity) || isNaN(mrp)) {
             console.warn(`Skipping row ${idx + 2}: Invalid data`);
@@ -268,7 +237,7 @@ export default function AddDraftPurchase() {
           }
 
           // Find product by part number (case insensitive)
-          const product = products.find(p =>
+          const product = products.find(p => 
             p.part_number && p.part_number.toLowerCase() === partNo.toLowerCase()
           );
 
@@ -279,7 +248,7 @@ export default function AddDraftPurchase() {
           }
 
           // Check if product already exists in the list
-          const isDuplicate = manualItems.some(item =>
+          const isDuplicate = manualItems.some(item => 
             String(item.product) === String(product.id)
           );
 
@@ -287,10 +256,8 @@ export default function AddDraftPurchase() {
             newItems.push({
               product: product.id,
               unit_cost_bdt: mrp.toFixed(2),
-              discount: !isNaN(discount) && discount ? String(discount) : "",
-              duty: !isNaN(duty) && duty ? String(duty) : "",
               quantity: quantity.toString(),
-              search: partNo,
+              search: `${partNo} - ${product.product_name || product.name}`,
               showDropdown: false,
             });
           }
@@ -311,7 +278,13 @@ export default function AddDraftPurchase() {
         }
 
         // Add new items
-        setManualItems([...updatedItems, ...newItems, emptyManualItem()]);
+        setManualItems([...updatedItems, ...newItems, { 
+          product: "", 
+          unit_cost_bdt: "", 
+          quantity: "", 
+          search: "", 
+          showDropdown: false 
+        }]);
 
         setError("");
         alert(`Successfully imported ${newItems.length} products from Excel.`);
@@ -333,20 +306,30 @@ export default function AddDraftPurchase() {
   const handleDownloadTemplate = () => {
     try {
       const templateData = [
-        { 'Part No': '1100223/C', 'Quantity': 5, 'MRP': 618, 'Discount': 30, 'Duty': 300 },
-        { 'Part No': '1570209/E', 'Quantity': 4, 'MRP': 502, 'Discount': 20, 'Duty': 250 },
-        { 'Part No': '1570250/D', 'Quantity': 30, 'MRP': 160, 'Discount': 10, 'Duty': 100 },
+        {
+          'Part No': '1100223/C',
+          'Quantity': 5,
+          'MRP': 618,
+        },
+        {
+          'Part No': '1570209/E',
+          'Quantity': 4,
+          'MRP': 502,
+        },
+        {
+          'Part No': '1570250/D',
+          'Quantity': 30,
+          'MRP': 160,
+        },
       ];
 
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.json_to_sheet(templateData);
-
+      
       ws['!cols'] = [
         { wch: 20 },
         { wch: 15 },
         { wch: 15 },
-        { wch: 12 },
-        { wch: 12 },
       ];
 
       XLSX.utils.book_append_sheet(wb, ws, "Template");
@@ -371,72 +354,58 @@ export default function AddDraftPurchase() {
 
       const exportData = itemsToExport.map((item, idx) => {
         const product = products.find((p) => String(p.id) === String(item.product));
-        const unitCost = parseFloat(item.unit_cost_bdt || 0);
-        const discount = parseFloat(item.discount || 0);
-        const duty = parseFloat(item.duty || 0);
-        const weight = parseFloat(product?.weight || 0);
-        const qty = parseFloat(item.quantity || 0);
-
-        const currentRate = calcCurrentRate(unitCost, discount);
-        const netDuty = calcNetDuty(weight, duty);
-        const cost = calcCost(unitCost, discount, weight, duty);
-
         return {
           '#': idx + 1,
           'Part No': product?.part_number || "N/A",
           'Product Name': product?.product_name || product?.name || "Unknown",
           'Brand': product ? getBrandName(product.brand) : "N/A",
-          'Unit Cost (BDT)': unitCost.toFixed(2),
-          'Discount (%)': discount || 0,
-          'Current Rate': currentRate.toFixed(2),
-          'HS Code': product?.hs_code || "N/A",
           'Weight (kg)': product?.weight || "N/A",
-          'Duty': duty || 0,
-          'Net Duty': netDuty.toFixed(2),
-          'Cost': cost.toFixed(2),
-          'Quantity': qty,
-          'Total': (cost * qty).toFixed(2),
-          'Total MRP': (unitCost * qty).toFixed(2),
+          'HS Code': product?.hs_code || "N/A",
+          'Unit Cost (BDT)': parseFloat(item.unit_cost_bdt || 0).toFixed(2),
+          'Quantity': item.quantity || 0,
+          'Total': (parseFloat(item.quantity || 0) * parseFloat(item.unit_cost_bdt || 0)).toFixed(2),
         };
       });
 
       // Add summary row
       const grandTotal = itemsToExport.reduce((sum, item) => {
-        const product = products.find((p) => String(p.id) === String(item.product));
-        const cost = calcCost(item.unit_cost_bdt, item.discount, product?.weight, item.duty);
-        return sum + cost * (parseFloat(item.quantity) || 0);
-      }, 0);
-
-      const grandTotalMrp = itemsToExport.reduce((sum, item) => {
-        return sum + (parseFloat(item.unit_cost_bdt) || 0) * (parseFloat(item.quantity) || 0);
+        return sum + (parseFloat(item.quantity || 0) * parseFloat(item.unit_cost_bdt || 0));
       }, 0);
 
       const footerRow = {
-        '#': '', 'Part No': '', 'Product Name': '', 'Brand': '',
-        'Unit Cost (BDT)': '', 'Discount (%)': '', 'Current Rate': '',
-        'HS Code': '', 'Weight (kg)': '', 'Duty': '', 'Net Duty': '',
-        'Cost': '', 'Quantity': '',
+        '#': '',
+        'Part No': '',
+        'Product Name': '',
+        'Brand': '',
+        'Weight (kg)': '',
+        'HS Code': '',
+        'Unit Cost (BDT)': '',
+        'Quantity': '',
         'Total': 'Grand Total: ৳ ' + grandTotal.toFixed(2),
-        'Total MRP': 'Grand Total MRP: ৳ ' + grandTotalMrp.toFixed(2),
       };
 
       const finalData = [...exportData, footerRow];
 
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.json_to_sheet(finalData);
-
+      
       ws['!cols'] = [
-        { wch: 5 }, { wch: 16 }, { wch: 26 }, { wch: 14 },
-        { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 10 },
-        { wch: 10 }, { wch: 8 }, { wch: 10 }, { wch: 10 },
-        { wch: 8 }, { wch: 18 }, { wch: 18 },
+        { wch: 5 },
+        { wch: 20 },
+        { wch: 30 },
+        { wch: 15 },
+        { wch: 12 },
+        { wch: 12 },
+        { wch: 15 },
+        { wch: 10 },
+        { wch: 20 },
       ];
 
       XLSX.utils.book_append_sheet(wb, ws, "Draft Purchase Order");
-
+      
       const timestamp = new Date().toISOString().slice(0, 10);
       const filename = `draft_purchase_${timestamp}.xlsx`;
-
+      
       XLSX.writeFile(wb, filename);
     } catch (err) {
       console.error("Error exporting draft:", err);
@@ -484,11 +453,13 @@ export default function AddDraftPurchase() {
       if (selectedProduct) {
         newItems[index].product = value;
         newItems[index].unit_cost_bdt = selectedProduct.purchase_cost_bdt || "";
-        newItems[index].search = selectedProduct.part_number || "";
+        const partNum = selectedProduct.part_number || "";
+        const name = selectedProduct.product_name || selectedProduct.name || "";
+        newItems[index].search = partNum ? `${partNum} - ${name}` : name;
         newItems[index].showDropdown = false;
       }
       if (index === newItems.length - 1) {
-        newItems.push(emptyManualItem());
+        newItems.push({ product: "", unit_cost_bdt: "", quantity: "", search: "", showDropdown: false });
       }
     } else {
       newItems[index][field] = value;
@@ -500,7 +471,7 @@ export default function AddDraftPurchase() {
     if (manualItems.length > 1) {
       setManualItems(manualItems.filter((_, i) => i !== index));
     } else {
-      setManualItems([emptyManualItem()]);
+      setManualItems([{ product: "", unit_cost_bdt: "", quantity: "", search: "", showDropdown: false }]);
     }
   };
 
@@ -569,8 +540,6 @@ export default function AddDraftPurchase() {
           part_number: p.part_number || "",
           brand_name: getBrandName(p.brand),
           unit_cost_bdt: p.purchase_cost_bdt || "",
-          discount: "",
-          duty: "",
           quantity: "",
           current_stock: getProductStock(p.id),
           weight: p.weight || "",
@@ -603,21 +572,12 @@ export default function AddDraftPurchase() {
     setSelectedBrands([]);
   };
 
-  // --- CALCULATIONS (grand totals across active mode) ---
+  // --- CALCULATIONS ---
   const activeItems = entryMode === "manual" ? manualItems : brandItems;
-
   const grandTotal = activeItems.reduce((sum, item) => {
-    const product = products.find((p) => String(p.id) === String(item.product));
-    const weight = entryMode === "manual" ? product?.weight : item.weight;
     const qty = parseFloat(item.quantity) || 0;
-    const cost = calcCost(item.unit_cost_bdt, item.discount, weight, item.duty);
-    return sum + cost * qty;
-  }, 0);
-
-  const grandTotalMrp = activeItems.reduce((sum, item) => {
-    const qty = parseFloat(item.quantity) || 0;
-    const unitCost = parseFloat(item.unit_cost_bdt) || 0;
-    return sum + unitCost * qty;
+    const cost = parseFloat(item.unit_cost_bdt) || 0;
+    return sum + qty * cost;
   }, 0);
 
   // --- SUBMIT ---
@@ -657,8 +617,6 @@ export default function AddDraftPurchase() {
         product: item.product,
         quantity: parseInt(item.quantity, 10),
         unit_cost_bdt: parseFloat(item.unit_cost_bdt).toFixed(2),
-        discount: item.discount ? parseFloat(item.discount) : 0,
-        duty: item.duty ? parseFloat(item.duty) : 0,
       })),
     };
 
@@ -700,6 +658,7 @@ export default function AddDraftPurchase() {
           </h1>
         </div>
         <div className="flex items-center gap-4">
+          {/* Export Button - Always visible when there are items */}
           {manualItems.some(item => item.product && parseFloat(item.quantity) > 0) && (
             <button
               type="button"
@@ -710,12 +669,8 @@ export default function AddDraftPurchase() {
             </button>
           )}
           <div className="text-right">
-            <span className="text-[10px] text-gray-500 uppercase tracking-wider">Total (Cost)</span>
+            <span className="text-[10px] text-gray-500 uppercase tracking-wider">Total Value</span>
             <div className="text-xl font-bold text-blue-600">৳ {grandTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
-          </div>
-          <div className="text-right">
-            <span className="text-[10px] text-gray-500 uppercase tracking-wider">Total MRP</span>
-            <div className="text-xl font-bold text-gray-500">৳ {grandTotalMrp.toLocaleString(undefined, { minimumFractionDigits: 2 })}</div>
           </div>
         </div>
       </div>
@@ -788,7 +743,8 @@ export default function AddDraftPurchase() {
           >
             <FiLayers size={14} /> Batch by Brand
           </button>
-
+          
+          {/* Excel Import Button - Always visible in manual mode */}
           {entryMode === "manual" && (
             <div className="ml-auto flex items-center gap-2">
               <input
@@ -812,10 +768,10 @@ export default function AddDraftPurchase() {
               >
                 <FiDownload size={14} /> Template
               </button>
-              <span className="text-[9px] text-gray-400">(Part No, Qty, MRP, Discount, Duty)</span>
+              <span className="text-[9px] text-gray-400">(Part No, Qty, MRP)</span>
             </div>
           )}
-
+          
           {isEditing && entryMode === "brand" && (
             <span className="text-xs text-gray-500 ml-2">(Brand mode disabled for editing)</span>
           )}
@@ -866,128 +822,75 @@ export default function AddDraftPurchase() {
             <thead>
               <tr className="bg-gray-800 text-white">
                 <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">#</th>
-                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-left">Part Number</th>
-                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-left">Product Name</th>
+                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-left">Product & Brand</th>
                 <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">Stock</th>
-                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">Unit Cost</th>
-                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">Discount %</th>
-                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">Curr. Rate</th>
+                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">Weight (kg)</th>
                 <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">HS Code</th>
-                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">Weight</th>
-                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">Duty</th>
-                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">Net Duty</th>
-                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">Cost</th>
+                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">Unit Cost</th>
                 <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">Qty</th>
                 <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-right">Total</th>
-                <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-right">Total MRP</th>
                 <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">Action</th>
               </tr>
             </thead>
             <tbody>
               {!isEditing && entryMode === "brand" &&
-                brandItems.map((item, index) => {
-                  const unitCost = parseFloat(item.unit_cost_bdt) || 0;
-                  const discount = parseFloat(item.discount) || 0;
-                  const duty = parseFloat(item.duty) || 0;
-                  const weight = parseFloat(item.weight) || 0;
-                  const qty = parseFloat(item.quantity) || 0;
-
-                  const currentRate = calcCurrentRate(unitCost, discount);
-                  const netDuty = calcNetDuty(weight, duty);
-                  const cost = calcCost(unitCost, discount, weight, duty);
-                  const rowTotal = cost * qty;
-                  const rowTotalMrp = unitCost * qty;
-
-                  return (
-                    <tr key={item.product} className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}>
-                      <td className="border border-gray-300 px-2 py-1.5 text-center text-xs text-gray-500">{index + 1}</td>
-                      <td className="border border-gray-300 px-2 py-1.5 text-xs font-mono text-blue-600">{item.part_number || "-"}</td>
-                      <td className="border border-gray-300 px-2 py-1.5">
-                        <div className="font-medium text-gray-800 text-xs">{item.product_name}</div>
-                        <div className="text-[9px] text-gray-500 uppercase">{item.brand_name}</div>
-                      </td>
-                      <td className="border border-gray-300 px-2 py-1.5 text-center">
-                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${item.current_stock <= 5 ? "bg-red-100 text-red-600" : "bg-green-100 text-green-700"}`}>
-                          {item.current_stock}
-                        </span>
-                      </td>
-                      <td className="border border-gray-300 px-2 py-1.5">
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="0.00"
-                          value={item.unit_cost_bdt}
-                          onChange={(e) => handleBrandItemChange(index, "unit_cost_bdt", e.target.value)}
-                          className="w-20 bg-white border border-gray-300 rounded p-0.5 text-xs text-center focus:ring-1 focus:ring-blue-500 outline-none font-semibold text-blue-700"
-                        />
-                      </td>
-                      <td className="border border-gray-300 px-2 py-1.5">
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          max="100"
-                          placeholder="0"
-                          value={item.discount}
-                          onChange={(e) => handleBrandItemChange(index, "discount", e.target.value)}
-                          className="w-16 bg-white border border-gray-300 rounded p-0.5 text-xs text-center focus:ring-1 focus:ring-blue-500 outline-none"
-                        />
-                      </td>
-                      <td className="border border-gray-300 px-2 py-1.5 text-center font-mono text-xs text-gray-700">
-                        {currentRate.toFixed(2)}
-                      </td>
-                      <td className="border border-gray-300 px-2 py-1.5 text-center text-xs text-gray-600">
-                        {item.hs_code || "-"}
-                      </td>
-                      <td className="border border-gray-300 px-2 py-1.5 text-center text-xs text-gray-600">
-                        {item.weight || "-"}
-                      </td>
-                      <td className="border border-gray-300 px-2 py-1.5">
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="0"
-                          value={item.duty}
-                          onChange={(e) => handleBrandItemChange(index, "duty", e.target.value)}
-                          className="w-16 bg-white border border-gray-300 rounded p-0.5 text-xs text-center focus:ring-1 focus:ring-blue-500 outline-none"
-                        />
-                      </td>
-                      <td className="border border-gray-300 px-2 py-1.5 text-center font-mono text-xs text-gray-700">
-                        {netDuty.toFixed(2)}
-                      </td>
-                      <td className="border border-gray-300 px-2 py-1.5 text-center font-mono text-xs font-semibold text-gray-800">
-                        {cost.toFixed(2)}
-                      </td>
-                      <td className="border border-gray-300 px-2 py-1.5">
-                        <input
-                          type="number"
-                          min="0"
-                          placeholder="0"
-                          value={item.quantity}
-                          onChange={(e) => handleBrandItemChange(index, "quantity", e.target.value)}
-                          className="w-16 bg-white border border-gray-300 rounded p-0.5 text-xs text-center focus:ring-1 focus:ring-blue-500 outline-none"
-                        />
-                      </td>
-                      <td className="border border-gray-300 px-2 py-1.5 text-right font-mono font-bold text-gray-700 text-xs">
-                        {rowTotal.toFixed(2)}
-                      </td>
-                      <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-gray-500 text-xs">
-                        {rowTotalMrp.toFixed(2)}
-                      </td>
-                      <td className="border border-gray-300 px-2 py-1.5 text-center">
-                        <button type="button" onClick={() => removeBrandRow(index)} className="text-gray-400 hover:text-red-600 transition p-0.5">
-                          <FiTrash2 size={15} />
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                brandItems.map((item, index) => (
+                  <tr key={item.product} className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                    <td className="border border-gray-300 px-2 py-1.5 text-center text-xs text-gray-500">{index + 1}</td>
+                    <td className="border border-gray-300 px-2 py-1.5">
+                      <div className="font-medium text-gray-800 text-xs">
+                        {item.part_number && <span className="text-blue-600 mr-1">{item.part_number}</span>}
+                        {item.product_name}
+                      </div>
+                      <div className="text-[9px] text-gray-500 uppercase">{item.brand_name}</div>
+                    </td>
+                    <td className="border border-gray-300 px-2 py-1.5 text-center">
+                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${item.current_stock <= 5 ? "bg-red-100 text-red-600" : "bg-green-100 text-green-700"}`}>
+                        {item.current_stock}
+                      </span>
+                    </td>
+                    <td className="border border-gray-300 px-2 py-1.5 text-center text-xs text-gray-600">
+                      {item.weight || "-"}
+                    </td>
+                    <td className="border border-gray-300 px-2 py-1.5 text-center text-xs text-gray-600">
+                      {item.hs_code || "-"}
+                    </td>
+                    <td className="border border-gray-300 px-2 py-1.5">
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        placeholder="0.00"
+                        value={item.unit_cost_bdt}
+                        onChange={(e) => handleBrandItemChange(index, "unit_cost_bdt", e.target.value)}
+                        className="w-full bg-white border border-gray-300 rounded p-0.5 text-xs text-center focus:ring-1 focus:ring-blue-500 outline-none font-semibold text-blue-700"
+                      />
+                    </td>
+                    <td className="border border-gray-300 px-2 py-1.5">
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="0"
+                        value={item.quantity}
+                        onChange={(e) => handleBrandItemChange(index, "quantity", e.target.value)}
+                        className="w-full bg-white border border-gray-300 rounded p-0.5 text-xs text-center focus:ring-1 focus:ring-blue-500 outline-none"
+                      />
+                    </td>
+                    <td className="border border-gray-300 px-2 py-1.5 text-right font-mono font-bold text-gray-700 text-xs">
+                      {((parseFloat(item.quantity) || 0) * (parseFloat(item.unit_cost_bdt) || 0)).toFixed(2)}
+                    </td>
+                    <td className="border border-gray-300 px-2 py-1.5 text-center">
+                      <button type="button" onClick={() => removeBrandRow(index)} className="text-gray-400 hover:text-red-600 transition p-0.5">
+                        <FiTrash2 size={15} />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
 
               {entryMode === "manual" &&
                 manualItems.map((item, index) => {
                   const selectedProd = products.find((p) => String(p.id) === String(item.product));
+                  const manualBrandName = selectedProd ? getBrandName(selectedProd.brand) : "";
                   const currentStock = selectedProd ? getProductStock(selectedProd.id) : "-";
                   const partNumber = selectedProd?.part_number || "";
                   const productName = selectedProd ? (selectedProd.product_name || selectedProd.name) : "";
@@ -995,29 +898,16 @@ export default function AddDraftPurchase() {
                   const weight = selectedProd?.weight || "";
                   const hsCode = selectedProd?.hs_code || "";
 
-                  const unitCost = parseFloat(item.unit_cost_bdt) || 0;
-                  const discount = parseFloat(item.discount) || 0;
-                  const duty = parseFloat(item.duty) || 0;
-                  const qty = parseFloat(item.quantity) || 0;
-
-                  const currentRate = calcCurrentRate(unitCost, discount);
-                  const netDuty = calcNetDuty(weight, duty);
-                  const cost = calcCost(unitCost, discount, weight, duty);
-                  const rowTotal = cost * qty;
-                  const rowTotalMrp = unitCost * qty;
-
                   return (
                     <tr key={index} className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}>
                       <td className="border border-gray-300 px-2 py-3 text-center text-xs text-gray-500">{index + 1}</td>
-
-                      {/* Part Number search/select */}
                       <td className={`border border-gray-300 px-2 py-3 overflow-visible ${item.showDropdown ? 'relative z-50' : 'relative z-10'}`}>
                         <div ref={(el) => (dropdownRefs.current[index] = el)}>
                           <div className="flex items-center border border-gray-300 rounded bg-white focus-within:ring-1 focus-within:ring-blue-500">
                             <FiSearch className="ml-1.5 text-gray-400" size={12} />
                             <input
                               type="text"
-                              placeholder="Search part no..."
+                              placeholder="Search by part number or name..."
                               value={item.search || ""}
                               onChange={(e) => handleManualItemChange(index, "search", e.target.value)}
                               onFocus={() => {
@@ -1025,7 +915,7 @@ export default function AddDraftPurchase() {
                                 newItems[index].showDropdown = true;
                                 setManualItems(newItems);
                               }}
-                              className="w-28 bg-transparent p-1 text-xs text-gray-800 focus:outline-none font-mono"
+                              className="w-full bg-transparent p-1 text-xs text-gray-800 focus:outline-none"
                               autoComplete="off"
                             />
                             {item.product && (
@@ -1046,7 +936,7 @@ export default function AddDraftPurchase() {
                             )}
                           </div>
                           {item.showDropdown && (
-                            <div className="absolute left-0 top-full mt-0.5 bg-white border border-gray-300 rounded shadow-lg max-h-60 overflow-y-auto z-50 min-w-[280px]">
+                            <div className="absolute left-0 right-0 top-full mt-0.5 bg-white border border-gray-300 rounded shadow-lg max-h-60 overflow-y-auto z-50">
                               {filteredProducts.length > 0 ? (
                                 <ul>
                                   {filteredProducts.map((p) => (
@@ -1073,19 +963,24 @@ export default function AddDraftPurchase() {
                             </div>
                           )}
                         </div>
+                        {selectedProd && (
+                          <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[9px] text-gray-600">
+                            {partNumber && <span className="font-mono text-blue-600">{partNumber}</span>}
+                            <span className="uppercase">{manualBrandName}</span>
+                          </div>
+                        )}
                       </td>
-
-                      {/* Product Name (auto-filled, read-only) */}
-                      <td className="border border-gray-300 px-2 py-3 text-xs text-gray-800">
-                        {productName || <span className="text-gray-300">-</span>}
-                      </td>
-
                       <td className="border border-gray-300 px-2 py-3 text-center">
                         <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${currentStock !== "-" && currentStock <= 5 ? "bg-red-100 text-red-600" : "text-gray-600"}`}>
                           {currentStock}
                         </span>
                       </td>
-
+                      <td className="border border-gray-300 px-2 py-3 text-center text-xs text-gray-600">
+                        {weight || "-"}
+                      </td>
+                      <td className="border border-gray-300 px-2 py-3 text-center text-xs text-gray-600">
+                        {hsCode || "-"}
+                      </td>
                       <td className="border border-gray-300 px-2 py-3">
                         <input
                           type="number"
@@ -1095,54 +990,9 @@ export default function AddDraftPurchase() {
                           placeholder="0.00"
                           value={item.unit_cost_bdt}
                           onChange={(e) => handleManualItemChange(index, "unit_cost_bdt", e.target.value)}
-                          className="w-20 bg-white border border-gray-300 rounded p-1 text-xs text-center focus:ring-1 focus:ring-blue-500 outline-none font-semibold text-blue-700"
+                          className="w-full bg-white border border-gray-300 rounded p-1 text-xs text-center focus:ring-1 focus:ring-blue-500 outline-none font-semibold text-blue-700"
                         />
                       </td>
-
-                      <td className="border border-gray-300 px-2 py-3">
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          max="100"
-                          placeholder="0"
-                          value={item.discount}
-                          onChange={(e) => handleManualItemChange(index, "discount", e.target.value)}
-                          className="w-16 bg-white border border-gray-300 rounded p-1 text-xs text-center focus:ring-1 focus:ring-blue-500 outline-none"
-                        />
-                      </td>
-
-                      <td className="border border-gray-300 px-2 py-3 text-center font-mono text-xs text-gray-700">
-                        {currentRate.toFixed(2)}
-                      </td>
-
-                      <td className="border border-gray-300 px-2 py-3 text-center text-xs text-gray-600">
-                        {hsCode || "-"}
-                      </td>
-                      <td className="border border-gray-300 px-2 py-3 text-center text-xs text-gray-600">
-                        {weight || "-"}
-                      </td>
-
-                      <td className="border border-gray-300 px-2 py-3">
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="0"
-                          value={item.duty}
-                          onChange={(e) => handleManualItemChange(index, "duty", e.target.value)}
-                          className="w-16 bg-white border border-gray-300 rounded p-1 text-xs text-center focus:ring-1 focus:ring-blue-500 outline-none"
-                        />
-                      </td>
-
-                      <td className="border border-gray-300 px-2 py-3 text-center font-mono text-xs text-gray-700">
-                        {netDuty.toFixed(2)}
-                      </td>
-
-                      <td className="border border-gray-300 px-2 py-3 text-center font-mono text-xs font-semibold text-gray-800">
-                        {cost.toFixed(2)}
-                      </td>
-
                       <td className="border border-gray-300 px-2 py-3">
                         <input
                           type="number"
@@ -1151,18 +1001,12 @@ export default function AddDraftPurchase() {
                           placeholder="0"
                           value={item.quantity}
                           onChange={(e) => handleManualItemChange(index, "quantity", e.target.value)}
-                          className="w-16 bg-white border border-gray-300 rounded p-1 text-xs text-center focus:ring-1 focus:ring-blue-500 outline-none"
+                          className="w-full bg-white border border-gray-300 rounded p-1 text-xs text-center focus:ring-1 focus:ring-blue-500 outline-none"
                         />
                       </td>
-
                       <td className="border border-gray-300 px-2 py-3 text-right font-mono font-bold text-gray-700 text-xs">
-                        {rowTotal.toFixed(2)}
+                        {((parseFloat(item.quantity) || 0) * (parseFloat(item.unit_cost_bdt) || 0)).toFixed(2)}
                       </td>
-
-                      <td className="border border-gray-300 px-2 py-3 text-right font-mono text-gray-500 text-xs">
-                        {rowTotalMrp.toFixed(2)}
-                      </td>
-
                       <td className="border border-gray-300 px-2 py-3 text-center">
                         <button type="button" onClick={() => removeManualRow(index)} className="text-gray-400 hover:text-red-600 transition p-0.5" title="Remove row">
                           <FiTrash2 size={15} />
@@ -1174,7 +1018,7 @@ export default function AddDraftPurchase() {
 
               {!isEditing && entryMode === "brand" && brandItems.length === 0 && (
                 <tr>
-                  <td colSpan="16" className="border border-gray-300 px-3 py-4 text-center text-gray-400 text-sm">
+                  <td colSpan="9" className="border border-gray-300 px-3 py-4 text-center text-gray-400 text-sm">
                     Use the brand selector above to load products.
                   </td>
                 </tr>
@@ -1188,7 +1032,9 @@ export default function AddDraftPurchase() {
           <div className="p-2 border-t border-gray-200 flex justify-between items-center">
             <button
               type="button"
-              onClick={() => setManualItems([...manualItems, emptyManualItem()])}
+              onClick={() =>
+                setManualItems([...manualItems, { product: "", unit_cost_bdt: "", quantity: "", search: "", showDropdown: false }])
+              }
               className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-800 font-semibold"
             >
               <FiPlus size={14} /> Add Row
@@ -1212,3 +1058,23 @@ export default function AddDraftPurchase() {
     </div>
   );
 }
+
+
+
+
+make changes :
+1. seperate Part Number and Product name .
+2. fields will be : Part Number | Product Name | Stock | Unit Cost | Discount | Current Rate | HS Code | Weight | Duty | Net Duty | Cost | QTY | Total | Total MRP | Action
+
+
+Suppose Unit cost is 600.
+3. So Current Rate = 600
+4. Discount field will be inputed manually as % like 30%.
+5. So Current Rate becomes : 600 - 30% = 420
+6. Duty will be input manually like 300 ( per unit)
+7. Net Duty = wieght * Duty = 0.5 * 300 = 150 
+8. Cost = Curr Rate + Duty = 420 + 150 = 570
+9. QTY = suppose 50
+10. Total = 570 * 50 = 28500
+11. Total ( curr rate ) =  600 * 50 = 30000
+12.  HS Code & Weight will be auto fetched as it is.

@@ -26,11 +26,6 @@ export default function DraftPurchaseList() {
   const [error, setError] = useState("");
   const [searchTerm, setSearchTerm] = useState("");
 
-  // View Modal State
-  const [isViewModalOpen, setIsViewModalOpen] = useState(false);
-  const [viewDraft, setViewDraft] = useState(null);
-  const [viewItems, setViewItems] = useState([]);
-
   useEffect(() => {
     fetchData();
   }, []);
@@ -72,12 +67,6 @@ export default function DraftPurchaseList() {
       : emp.full_name || emp.name || emp.employee_id;
   };
 
-  const getProductPartNumber = (item) => {
-    if (!item) return "N/A";
-    const product = products.find((p) => String(p.id) === String(item.product));
-    return product?.part_number || "N/A";
-  };
-
   const getProductName = (item) => {
     if (!item) return "Unknown";
     const product = products.find((p) => String(p.id) === String(item.product));
@@ -100,17 +89,13 @@ export default function DraftPurchaseList() {
     return { total, count, latest };
   }, [drafts]);
 
-  // --- VIEW MODAL ---
-  const openViewModal = (draft) => {
-    setViewDraft(draft);
-    setViewItems(draft.items || []);
-    setIsViewModalOpen(true);
+  // --- NAVIGATION FUNCTIONS ---
+  const handleView = (id) => {
+    navigate(`/dashboard/draft-purchase/view/${id}`);
   };
 
-  const closeViewModal = () => {
-    setIsViewModalOpen(false);
-    setViewDraft(null);
-    setViewItems([]);
+  const handleEdit = (id) => {
+    navigate(`/dashboard/draft-purchase/edit/${id}`);
   };
 
   // --- DELETE ---
@@ -123,11 +108,6 @@ export default function DraftPurchaseList() {
         alert("Failed to delete draft. Check server logs.");
       }
     }
-  };
-
-  // --- NAVIGATE TO EDIT ---
-  const handleEdit = (id) => {
-    navigate(`/dashboard/draft-purchase/edit/${id}`);
   };
 
   // --- FILTER ---
@@ -292,9 +272,9 @@ export default function DraftPurchaseList() {
                         </td>
                         <td className="border border-gray-300 px-2 py-1.5 text-center">
                           <div className="flex justify-center items-center gap-1">
-                            {/* View */}
+                            {/* View - Navigate to dedicated view page */}
                             <button
-                              onClick={() => openViewModal(draft)}
+                              onClick={() => handleView(draft.id)}
                               className="text-gray-500 hover:text-blue-600 transition p-0.5"
                               title="View Details"
                             >
@@ -333,119 +313,6 @@ export default function DraftPurchaseList() {
           </div>
         )}
       </div>
-
-      {/* --- VIEW MODAL (items only) --- */}
-      {isViewModalOpen && viewDraft && (
-        <div className="fixed inset-0 bg-black bg-opacity-40 flex justify-center items-center z-50 p-3">
-          <div className="bg-white border border-gray-300 w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden rounded-lg">
-            {/* Header */}
-            <div className="bg-gray-100 border-b border-gray-300 px-4 py-2 flex justify-between items-center shrink-0">
-              <div>
-                <h2 className="font-bold text-gray-800 flex items-center gap-2">
-                  <FiBox className="text-blue-600" /> {viewDraft.draft_number}
-                </h2>
-                <p className="text-[10px] text-gray-500">
-                  Created: {new Date(viewDraft.purchase_date).toLocaleString("en-BD")}
-                  {viewDraft.remarks && ` • ${viewDraft.remarks}`}
-                </p>
-              </div>
-              <button
-                onClick={closeViewModal}
-                className="text-gray-500 hover:text-red-500"
-              >
-                <FiX size={20} />
-              </button>
-            </div>
-
-            {/* Body (scrollable) */}
-            <div className="overflow-y-auto flex-1 p-4">
-              <div>
-                <h3 className="text-[11px] font-bold text-gray-600 uppercase tracking-wider mb-1">
-                  Products
-                </h3>
-                <div className="border border-gray-300 overflow-hidden">
-                  <table className="w-full border-collapse text-sm">
-                    <thead>
-                      <tr className="bg-gray-800 text-white">
-                        <th className="border border-gray-600 px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-center">
-                          SL
-                        </th>
-                        <th className="border border-gray-600 px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-left">
-                          Part No / Product
-                        </th>
-                        <th className="border border-gray-600 px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-center">
-                          Qty
-                        </th>
-                        <th className="border border-gray-600 px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-right">
-                          Unit Cost
-                        </th>
-                        <th className="border border-gray-600 px-2 py-1 text-[11px] font-semibold uppercase tracking-wider text-right">
-                          Total
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {viewItems.map((item, idx) => {
-                        const partNumber = getProductPartNumber(item);
-                        const productName = getProductName(item);
-                        return (
-                          <tr key={idx} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
-                            <td className="border border-gray-300 px-2 py-1 text-center text-xs">
-                              {idx + 1}
-                            </td>
-                            <td className="border border-gray-300 px-2 py-1">
-                              <div className="text-xs font-bold text-gray-800">
-                                {partNumber}
-                              </div>
-                              <div className="text-[10px] text-gray-500">
-                                {productName}
-                              </div>
-                            </td>
-                            <td className="border border-gray-300 px-2 py-1 text-center text-xs">
-                              {item.quantity}
-                            </td>
-                            <td className="border border-gray-300 px-2 py-1 text-right font-mono text-xs">
-                              ৳ {parseFloat(item.unit_cost_bdt).toFixed(2)}
-                            </td>
-                            <td className="border border-gray-300 px-2 py-1 text-right font-mono font-bold text-xs">
-                              ৳ {parseFloat(item.total_cost_bdt).toFixed(2)}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-              {/* Grand total summary */}
-              <div className="text-right mt-2 text-sm font-bold text-gray-800">
-                Grand Total: ৳ {viewDraft.total_amount.toFixed(2)}
-              </div>
-            </div>
-
-            {/* Footer */}
-            <div className="bg-gray-50 border-t border-gray-300 px-4 py-2 flex justify-end gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={closeViewModal}
-                className="px-3 py-1.5 rounded text-sm font-medium text-gray-600 hover:bg-gray-200 border border-gray-300"
-              >
-                Close
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  closeViewModal();
-                  handleEdit(viewDraft.id);
-                }}
-                className="px-4 py-1.5 rounded text-sm font-bold text-white bg-blue-600 hover:bg-blue-700 transition flex items-center gap-1.5"
-              >
-                <FiEdit2 /> Edit Draft
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

@@ -27,6 +27,7 @@ import ViewPurchase from './pages/admin/purchase/ViewPurchase';
 // NEW: Draft Purchase imports
 import DraftPurchaseList from './pages/admin/purchase/DraftPurchaseList';
 import AddDraftPurchase from './pages/admin/purchase/AddDraftPurchase';
+import ViewDraftPurchase from './pages/admin/purchase/ViewDraftPurchase';
 
 import StockList from './pages/admin/stock/StockList';
 import SaleHistory from './pages/admin/sales/SaleHistory';
@@ -96,6 +97,7 @@ export const router = createBrowserRouter([
       { path: "draft-purchase", element: <DraftPurchaseList /> },
       { path: "draft-purchase/add", element: <AddDraftPurchase /> },
       { path: "draft-purchase/edit/:id", element: <AddDraftPurchase /> },
+      { path: "draft-purchase/view/:id", element: <ViewDraftPurchase /> },
 
       // Stock Routes
       { path: "stock", element: <StockList /> },
