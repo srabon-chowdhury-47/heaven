@@ -14,6 +14,7 @@ import {
   FiSearch,
   FiUpload,
   FiDownload,
+  FiFileText,
 } from "react-icons/fi";
 import * as XLSX from "xlsx";
 
@@ -64,6 +65,11 @@ export default function AddPurchase() {
   });
   const [addingSupplier, setAddingSupplier] = useState(false);
   const [supplierError, setSupplierError] = useState("");
+
+  // --- DRAFT IMPORT MODAL ---
+  const [showDraftModal, setShowDraftModal] = useState(false);
+  const [draftList, setDraftList] = useState([]);
+  const [loadingDrafts, setLoadingDrafts] = useState(false);
 
   // Refs for dropdown outside click handling
   const dropdownRefs = useRef({});
@@ -444,6 +450,78 @@ export default function AddPurchase() {
     }
   };
 
+  // --- DRAFT IMPORT FUNCTIONS ---
+  const fetchDrafts = async () => {
+    if (draftList.length > 0) return; // already loaded
+    setLoadingDrafts(true);
+    try {
+      const response = await axiosInstance.get('draft-purchase/draft-orders/');
+      setDraftList(response.data);
+    } catch (err) {
+      console.error('Failed to fetch drafts', err);
+      alert('Failed to load draft orders.');
+    } finally {
+      setLoadingDrafts(false);
+    }
+  };
+
+  const importDraft = (draft) => {
+    // We will add items to manualItems
+    const newItems = [];
+    const existingProductIds = manualItems.map(item => String(item.product)).filter(id => id !== '');
+    let hasDuplicates = false;
+
+    draft.items.forEach(item => {
+      const productId = item.product;
+      if (existingProductIds.includes(String(productId))) {
+        hasDuplicates = true;
+        return; // skip duplicate
+      }
+      // Find product in products list by id
+      const product = products.find(p => String(p.id) === String(productId));
+      if (!product) {
+        console.warn(`Product with id ${productId} not found, skipping.`);
+        return;
+      }
+      // Create new item
+      const newItem = {
+        product: product.id,
+        unit_cost_bdt: parseFloat(item.unit_cost_bdt).toFixed(2),
+        quantity: item.quantity.toString(),
+        search: `${product.part_number || ''} - ${product.product_name || product.name || ''}`,
+        showDropdown: false,
+      };
+      newItems.push(newItem);
+    });
+
+    if (newItems.length === 0) {
+      if (hasDuplicates) {
+        alert('All products from this draft are already in the list.');
+      } else {
+        alert('No valid products found in this draft.');
+      }
+      setShowDraftModal(false);
+      return;
+    }
+
+    // Remove the last empty row if it exists
+    let updatedItems = [...manualItems];
+    const lastItem = updatedItems[updatedItems.length - 1];
+    if (lastItem && !lastItem.product && !lastItem.quantity && !lastItem.unit_cost_bdt) {
+      updatedItems.pop();
+    }
+
+    // Append new items
+    updatedItems = [...updatedItems, ...newItems];
+    // Add a new empty row at end
+    updatedItems.push({ product: "", unit_cost_bdt: "", quantity: "", search: "", showDropdown: false });
+
+    setManualItems(updatedItems);
+    setEntryMode('manual'); // switch to manual mode
+    setShowDraftModal(false);
+    setError(''); // clear any errors
+  };
+
   // --- HELPERS ---
   const getProductStock = (productId) => {
     const stockItem = stocks.find((s) => String(s.product) === String(productId));
@@ -734,6 +812,19 @@ export default function AddPurchase() {
           <h1 className="text-xl font-bold flex items-center gap-2">
             <FiShoppingBag className="text-blue-600" /> {isEditing ? "Edit Purchase Order" : "New Purchase Order"}
           </h1>
+          {/* Import Draft button - positioned like AddSale */}
+          {!isEditing && (
+            <button
+              type="button"
+              onClick={() => {
+                setShowDraftModal(true);
+                fetchDrafts();
+              }}
+              className="ml-2 flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded border border-blue-700 transition"
+            >
+              <FiFileText size={14} /> Import Draft
+            </button>
+          )}
         </div>
         <div className="flex items-center gap-4">
           {/* Export Button - Always visible when there are items */}
@@ -1236,6 +1327,92 @@ export default function AddPurchase() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* --- DRAFT IMPORT MODAL --- */}
+      {!isEditing && showDraftModal && (
+        <div className="fixed inset-0 bg-black/60 flex justify-center items-center z-50 p-3">
+          <div className="bg-white border border-gray-300 w-full max-w-3xl max-h-[90vh] flex flex-col rounded-lg">
+            <div className="bg-gray-100 border-b border-gray-300 px-4 py-2 flex justify-between items-center shrink-0">
+              <h2 className="font-bold text-gray-800 flex items-center gap-2">
+                <FiFileText className="text-blue-600" /> Import from Draft Purchase
+              </h2>
+              <button
+                onClick={() => setShowDraftModal(false)}
+                className="text-gray-500 hover:text-red-500"
+              >
+                <FiX size={20} />
+              </button>
+            </div>
+
+            <div className="overflow-y-auto flex-1 p-4">
+              {loadingDrafts ? (
+                <p className="text-center text-gray-500">Loading drafts...</p>
+              ) : draftList.length === 0 ? (
+                <p className="text-center text-gray-400">No draft purchases available.</p>
+              ) : (
+                <div className="border border-gray-300 overflow-hidden">
+                  <table className="w-full border-collapse text-sm">
+                    <thead>
+                      <tr className="bg-gray-800 text-white">
+                        <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-left">
+                          Draft #
+                        </th>
+                        <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-left">
+                          Date
+                        </th>
+                        <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-right">
+                          Total
+                        </th>
+                        <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
+                          Action
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {draftList.map((draft, idx) => (
+                        <tr key={draft.id} className={idx % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                          <td className="border border-gray-300 px-2 py-1.5 text-xs font-medium">
+                            {draft.draft_number}
+                          </td>
+                          <td className="border border-gray-300 px-2 py-1.5 text-xs">
+                            {new Date(draft.purchase_date).toLocaleDateString("en-BD", {
+                              day: "2-digit",
+                              month: "short",
+                              year: "numeric",
+                            })}
+                          </td>
+                          <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-xs font-bold">
+                            ৳ {parseFloat(draft.total_amount).toFixed(2)}
+                          </td>
+                          <td className="border border-gray-300 px-2 py-1.5 text-center">
+                            <button
+                              type="button"
+                              onClick={() => importDraft(draft)}
+                              className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded text-xs font-semibold transition"
+                            >
+                              Import
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div className="bg-gray-50 border-t border-gray-300 px-4 py-2 flex justify-end shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowDraftModal(false)}
+                className="px-3 py-1.5 rounded text-sm font-medium text-gray-600 hover:bg-gray-200 border border-gray-300"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

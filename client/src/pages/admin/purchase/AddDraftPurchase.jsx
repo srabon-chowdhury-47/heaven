@@ -15,24 +15,22 @@ import {
   FiUpload,
   FiDownload,
 } from "react-icons/fi";
+import { FaLocationArrow } from "react-icons/fa6";
 import * as XLSX from "xlsx";
 
 // --- CALCULATION HELPERS ---
-// Current Rate = Unit Cost - (Discount% of Unit Cost)
 const calcCurrentRate = (unitCost, discountPct) => {
   const cost = parseFloat(unitCost) || 0;
   const disc = parseFloat(discountPct) || 0;
   return cost - (cost * disc) / 100;
 };
 
-// Net Duty = Weight * Duty (fallback to just Duty if weight missing/zero)
 const calcNetDuty = (weight, duty) => {
   const w = parseFloat(weight) || 0;
   const d = parseFloat(duty) || 0;
   return w > 0 ? w * d : d;
 };
 
-// Cost = Current Rate + Net Duty
 const calcCost = (unitCost, discountPct, weight, duty) => {
   const currentRate = calcCurrentRate(unitCost, discountPct);
   const netDuty = calcNetDuty(weight, duty);
@@ -41,9 +39,9 @@ const calcCost = (unitCost, discountPct, weight, duty) => {
 
 const emptyManualItem = () => ({
   product: "",
-  unit_cost_bdt: "", // Unit Cost (MRP-based base cost)
-  discount: "", // %
-  duty: "", // per unit, manual input
+  unit_cost_bdt: "",
+  discount: "",
+  duty: "",
   quantity: "",
   search: "",
   showDropdown: false,
@@ -58,7 +56,6 @@ export default function AddDraftPurchase() {
   const [fetchingDraft, setFetchingDraft] = useState(isEditing);
   const [error, setError] = useState("");
 
-  // --- CORE DATA STATES ---
   const [products, setProducts] = useState([]);
   const [employees, setEmployees] = useState([]);
   const [brands, setBrands] = useState([]);
@@ -66,21 +63,17 @@ export default function AddDraftPurchase() {
   const [users, setUsers] = useState([]);
   const [currentUser, setCurrentUser] = useState(null);
 
-  // --- UI TOGGLE STATE ---
   const [entryMode, setEntryMode] = useState("manual");
   const [selectedBrands, setSelectedBrands] = useState([]);
 
-  // --- ORDER HEADER (no supplier, no invoice) ---
   const [orderData, setOrderData] = useState({
     remarks: "",
     entry_by: "",
   });
 
-  // --- ITEM STATES ---
   const [manualItems, setManualItems] = useState([emptyManualItem()]);
   const [brandItems, setBrandItems] = useState([]);
 
-  // Refs for dropdown outside click handling
   const dropdownRefs = useRef({});
   const fileInputRef = useRef(null);
 
@@ -93,24 +86,17 @@ export default function AddDraftPurchase() {
         if (user) {
           setCurrentUser(user);
           if (!isEditing) {
-            setOrderData(prev => ({
-              ...prev,
-              entry_by: user.id
-            }));
+            setOrderData(prev => ({ ...prev, entry_by: user.id }));
           }
           return;
         }
       }
-
       try {
         const user = await userService.getCurrentUser();
         if (user && user.id) {
           setCurrentUser(user);
           if (!isEditing) {
-            setOrderData(prev => ({
-              ...prev,
-              entry_by: user.id
-            }));
+            setOrderData(prev => ({ ...prev, entry_by: user.id }));
           }
           localStorage.setItem('user', JSON.stringify(user));
           return;
@@ -118,15 +104,11 @@ export default function AddDraftPurchase() {
       } catch (err) {
         console.error("Failed to fetch current user from API", err);
       }
-
       if (usersData && usersData.length > 0) {
         const firstUser = usersData[0];
         setCurrentUser(firstUser);
         if (!isEditing) {
-          setOrderData(prev => ({
-            ...prev,
-            entry_by: firstUser.id
-          }));
+          setOrderData(prev => ({ ...prev, entry_by: firstUser.id }));
         }
       }
     } catch (err) {
@@ -145,7 +127,13 @@ export default function AddDraftPurchase() {
         axiosInstance.get("users/users/"),
       ]);
 
-      setProducts(prodRes.data.results || prodRes.data);
+      // Keep a local reference to the freshly-fetched product list so we don't
+      // depend on the `products` state variable being updated in time (React
+      // batches state updates, so reading `products` from closure right after
+      // setProducts() can still return the old/empty array).
+      const productList = prodRes.data.results || prodRes.data;
+
+      setProducts(productList);
       setEmployees(empRes.data.results || empRes.data);
       setBrands(brandRes.data.results || brandRes.data);
       setStocks(stockRes.data.results || stockRes.data);
@@ -154,7 +142,8 @@ export default function AddDraftPurchase() {
       await loadCurrentUser(usersRes.data);
 
       if (isEditing) {
-        await fetchDraftData();
+        // Pass the fresh product list directly instead of relying on state.
+        await fetchDraftData(productList);
       }
     } catch (err) {
       console.error("Failed to fetch data", err);
@@ -164,7 +153,7 @@ export default function AddDraftPurchase() {
   };
 
   // --- FETCH DRAFT DATA FOR EDITING ---
-  const fetchDraftData = async () => {
+  const fetchDraftData = async (productList) => {
     try {
       console.log("Fetching draft with ID:", id);
       const response = await axiosInstance.get(`draft-purchase/draft-orders/${id}/`);
@@ -179,10 +168,16 @@ export default function AddDraftPurchase() {
       });
 
       if (draft.items && draft.items.length > 0) {
+        // Use the product list passed in (fresh from the API call), falling
+        // back to the `products` state in case this is ever called without
+        // an explicit list.
+        const list = productList || products;
+
         const items = draft.items.map((item) => {
-          const product = products.find((p) => String(p.id) === String(item.product));
-          const partNumber = product?.part_number || "";
-          const productName = item.product_name || product?.product_name || product?.name || "";
+          const product = list.find((p) => String(p.id) === String(item.product));
+          // The search box only ever holds the part number — never the
+          // product name. The name is rendered separately in its own column.
+          const searchDisplay = product?.part_number || "";
 
           return {
             product: item.product,
@@ -190,7 +185,7 @@ export default function AddDraftPurchase() {
             discount: item.discount != null ? String(item.discount) : "",
             duty: item.duty != null ? String(item.duty) : "",
             quantity: item.quantity,
-            search: partNumber || productName,
+            search: searchDisplay,
             showDropdown: false,
           };
         });
@@ -213,7 +208,7 @@ export default function AddDraftPurchase() {
     fetchData();
   }, [id]);
 
-  // --- EXCEL IMPORT FUNCTION ---
+  // --- EXCEL IMPORT (works in both modes; switches to manual) ---
   const handleExcelImport = (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -231,7 +226,6 @@ export default function AddDraftPurchase() {
           return;
         }
 
-        // Map columns (case insensitive)
         const headers = Object.keys(jsonData[0]).map(h => h.toLowerCase().trim());
         const partNoIndex = headers.findIndex(h => h.includes('part') || h.includes('partno'));
         const quantityIndex = headers.findIndex(h => h.includes('quantity') || h.includes('qty'));
@@ -251,7 +245,6 @@ export default function AddDraftPurchase() {
         const discountKey = discountIndex !== -1 ? columnKeys[discountIndex] : null;
         const dutyKey = dutyIndex !== -1 ? columnKeys[dutyIndex] : null;
 
-        // Process each row
         const newItems = [];
         let hasError = false;
 
@@ -267,7 +260,6 @@ export default function AddDraftPurchase() {
             return;
           }
 
-          // Find product by part number (case insensitive)
           const product = products.find(p =>
             p.part_number && p.part_number.toLowerCase() === partNo.toLowerCase()
           );
@@ -278,7 +270,6 @@ export default function AddDraftPurchase() {
             return;
           }
 
-          // Check if product already exists in the list
           const isDuplicate = manualItems.some(item =>
             String(item.product) === String(product.id)
           );
@@ -290,7 +281,7 @@ export default function AddDraftPurchase() {
               discount: !isNaN(discount) && discount ? String(discount) : "",
               duty: !isNaN(duty) && duty ? String(duty) : "",
               quantity: quantity.toString(),
-              search: partNo,
+              search: product.part_number || "",  // use part number
               showDropdown: false,
             });
           }
@@ -303,16 +294,16 @@ export default function AddDraftPurchase() {
           return;
         }
 
-        // Remove the last empty row if it exists
+        // Remove trailing empty row if any
         const updatedItems = [...manualItems];
         const lastItem = updatedItems[updatedItems.length - 1];
         if (lastItem && !lastItem.product && !lastItem.quantity && !lastItem.unit_cost_bdt) {
           updatedItems.pop();
         }
 
-        // Add new items
         setManualItems([...updatedItems, ...newItems, emptyManualItem()]);
-
+        // Switch to manual mode so imported items are visible
+        setEntryMode("manual");
         setError("");
         alert(`Successfully imported ${newItems.length} products from Excel.`);
 
@@ -323,13 +314,12 @@ export default function AddDraftPurchase() {
     };
 
     reader.readAsArrayBuffer(file);
-    // Reset file input
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
     }
   };
 
-  // --- DOWNLOAD TEMPLATE ---
+  // --- DOWNLOAD TEMPLATE (unchanged) ---
   const handleDownloadTemplate = () => {
     try {
       const templateData = [
@@ -340,15 +330,7 @@ export default function AddDraftPurchase() {
 
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.json_to_sheet(templateData);
-
-      ws['!cols'] = [
-        { wch: 20 },
-        { wch: 15 },
-        { wch: 15 },
-        { wch: 12 },
-        { wch: 12 },
-      ];
-
+      ws['!cols'] = [{ wch: 20 }, { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 12 }];
       XLSX.utils.book_append_sheet(wb, ws, "Template");
       XLSX.writeFile(wb, "draft_purchase_import_template.xlsx");
     } catch (err) {
@@ -357,10 +339,11 @@ export default function AddDraftPurchase() {
     }
   };
 
-  // --- EXPORT CURRENT DRAFT TO EXCEL ---
+  // --- EXPORT ACTIVE ITEMS (both modes) ---
   const handleExportPurchase = () => {
     try {
-      const itemsToExport = manualItems.filter(
+      const activeItems = entryMode === "manual" ? manualItems : brandItems;
+      const itemsToExport = activeItems.filter(
         (i) => i.product && parseFloat(i.quantity) > 0 && parseFloat(i.unit_cost_bdt) >= 0
       );
 
@@ -374,7 +357,7 @@ export default function AddDraftPurchase() {
         const unitCost = parseFloat(item.unit_cost_bdt || 0);
         const discount = parseFloat(item.discount || 0);
         const duty = parseFloat(item.duty || 0);
-        const weight = parseFloat(product?.weight || 0);
+        const weight = parseFloat(entryMode === "manual" ? product?.weight : item.weight) || 0;
         const qty = parseFloat(item.quantity || 0);
 
         const currentRate = calcCurrentRate(unitCost, discount);
@@ -400,10 +383,11 @@ export default function AddDraftPurchase() {
         };
       });
 
-      // Add summary row
+      // Grand total
       const grandTotal = itemsToExport.reduce((sum, item) => {
         const product = products.find((p) => String(p.id) === String(item.product));
-        const cost = calcCost(item.unit_cost_bdt, item.discount, product?.weight, item.duty);
+        const weight = entryMode === "manual" ? product?.weight : item.weight;
+        const cost = calcCost(item.unit_cost_bdt, item.discount, weight, item.duty);
         return sum + cost * (parseFloat(item.quantity) || 0);
       }, 0);
 
@@ -424,14 +408,12 @@ export default function AddDraftPurchase() {
 
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.json_to_sheet(finalData);
-
       ws['!cols'] = [
         { wch: 5 }, { wch: 16 }, { wch: 26 }, { wch: 14 },
         { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 10 },
         { wch: 10 }, { wch: 8 }, { wch: 10 }, { wch: 10 },
         { wch: 8 }, { wch: 18 }, { wch: 18 },
       ];
-
       XLSX.utils.book_append_sheet(wb, ws, "Draft Purchase Order");
 
       const timestamp = new Date().toISOString().slice(0, 10);
@@ -454,6 +436,39 @@ export default function AddDraftPurchase() {
     if (!brandId) return "Generic";
     const brand = brands.find((b) => String(b.id) === String(brandId));
     return brand ? brand.name : "Unknown Brand";
+  };
+
+  // --- Apply discount/duty to all products of the same brand (Brand mode) ---
+  const applyDiscountToBrand = (index) => {
+    const item = brandItems[index];
+    const product = products.find(p => String(p.id) === String(item.product));
+    if (!product) return;
+    const brandId = product.brand;
+    const discountValue = item.discount;
+    const newItems = brandItems.map((it) => {
+      const prod = products.find(p => String(p.id) === String(it.product));
+      if (prod && prod.brand === brandId) {
+        return { ...it, discount: discountValue };
+      }
+      return it;
+    });
+    setBrandItems(newItems);
+  };
+
+  const applyDutyToBrand = (index) => {
+    const item = brandItems[index];
+    const product = products.find(p => String(p.id) === String(item.product));
+    if (!product) return;
+    const brandId = product.brand;
+    const dutyValue = item.duty;
+    const newItems = brandItems.map((it) => {
+      const prod = products.find(p => String(p.id) === String(it.product));
+      if (prod && prod.brand === brandId) {
+        return { ...it, duty: dutyValue };
+      }
+      return it;
+    });
+    setBrandItems(newItems);
   };
 
   // --- HEADER HANDLERS ---
@@ -484,6 +499,7 @@ export default function AddDraftPurchase() {
       if (selectedProduct) {
         newItems[index].product = value;
         newItems[index].unit_cost_bdt = selectedProduct.purchase_cost_bdt || "";
+        // Set search field to part number (or empty if none)
         newItems[index].search = selectedProduct.part_number || "";
         newItems[index].showDropdown = false;
       }
@@ -684,6 +700,9 @@ export default function AddDraftPurchase() {
     );
   }
 
+  // Check if any active item has quantity > 0 to show export button
+  const hasActiveItems = activeItems.some(item => parseFloat(item.quantity) > 0 && item.product);
+
   return (
     <div className="max-w-7xl mx-auto p-3 bg-gray-50 min-h-screen">
       {/* Header */}
@@ -700,13 +719,13 @@ export default function AddDraftPurchase() {
           </h1>
         </div>
         <div className="flex items-center gap-4">
-          {manualItems.some(item => item.product && parseFloat(item.quantity) > 0) && (
+          {hasActiveItems && (
             <button
               type="button"
               onClick={handleExportPurchase}
               className="flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded border border-purple-300 bg-purple-50 text-purple-700 hover:bg-purple-100 transition"
             >
-              <FiDownload size={14} /> Export Draft
+              <FiDownload size={14} /> Export to Excel
             </button>
           )}
           <div className="text-right">
@@ -727,7 +746,7 @@ export default function AddDraftPurchase() {
       )}
 
       <form onSubmit={handleSubmit} className="bg-white border border-gray-300 overflow-hidden">
-        {/* --- ORDER HEADER (Compact Grid) --- */}
+        {/* --- ORDER HEADER --- */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 p-2 bg-gray-50 border-b border-gray-300">
           <div>
             <label className="block text-[10px] font-semibold text-gray-600 uppercase tracking-wider">Entry By (Auto)</label>
@@ -762,7 +781,7 @@ export default function AddDraftPurchase() {
           </div>
         </div>
 
-        {/* --- ENTRY MODE TOGGLE --- */}
+        {/* --- ENTRY MODE TOGGLE + IMPORT --- */}
         <div className="bg-gray-50 border-b border-gray-300 px-3 py-1.5 flex gap-2 flex-wrap items-center">
           <button
             type="button"
@@ -789,32 +808,24 @@ export default function AddDraftPurchase() {
             <FiLayers size={14} /> Batch by Brand
           </button>
 
-          {entryMode === "manual" && (
-            <div className="ml-auto flex items-center gap-2">
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleExcelImport}
-                accept=".xlsx,.xls"
-                className="hidden"
-                id="excel-upload"
-              />
-              <label
-                htmlFor="excel-upload"
-                className="flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded border border-green-300 bg-green-50 text-green-700 hover:bg-green-100 cursor-pointer transition"
-              >
-                <FiUpload size={14} /> Import Excel
-              </label>
-              <button
-                type="button"
-                onClick={handleDownloadTemplate}
-                className="flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded border border-blue-300 bg-blue-50 text-blue-700 hover:bg-blue-100 cursor-pointer transition"
-              >
-                <FiDownload size={14} /> Template
-              </button>
-              <span className="text-[9px] text-gray-400">(Part No, Qty, MRP, Discount, Duty)</span>
-            </div>
-          )}
+          {/* Import Excel - always visible */}
+          <div className="ml-auto flex items-center gap-2">
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleExcelImport}
+              accept=".xlsx,.xls"
+              className="hidden"
+              id="excel-upload"
+            />
+            <label
+              htmlFor="excel-upload"
+              className="flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded border border-green-300 bg-green-50 text-green-700 hover:bg-green-100 cursor-pointer transition"
+            >
+              <FiUpload size={14} /> Import Excel
+            </label>
+            <span className="text-[9px] text-gray-400">(Part No, Qty, MRP, Discount, Duty)</span>
+          </div>
 
           {isEditing && entryMode === "brand" && (
             <span className="text-xs text-gray-500 ml-2">(Brand mode disabled for editing)</span>
@@ -884,6 +895,7 @@ export default function AddDraftPurchase() {
               </tr>
             </thead>
             <tbody>
+              {/* Brand mode rows */}
               {!isEditing && entryMode === "brand" &&
                 brandItems.map((item, index) => {
                   const unitCost = parseFloat(item.unit_cost_bdt) || 0;
@@ -897,6 +909,14 @@ export default function AddDraftPurchase() {
                   const cost = calcCost(unitCost, discount, weight, duty);
                   const rowTotal = cost * qty;
                   const rowTotalMrp = unitCost * qty;
+
+                  const product = products.find(p => String(p.id) === String(item.product));
+                  const brandId = product?.brand;
+                  const hasSameBrandItems = brandItems.some((it, idx) => {
+                    if (idx === index) return false;
+                    const p = products.find(pr => String(pr.id) === String(it.product));
+                    return p && p.brand === brandId;
+                  });
 
                   return (
                     <tr key={item.product} className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}>
@@ -923,16 +943,28 @@ export default function AddDraftPurchase() {
                         />
                       </td>
                       <td className="border border-gray-300 px-2 py-1.5">
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          max="100"
-                          placeholder="0"
-                          value={item.discount}
-                          onChange={(e) => handleBrandItemChange(index, "discount", e.target.value)}
-                          className="w-16 bg-white border border-gray-300 rounded p-0.5 text-xs text-center focus:ring-1 focus:ring-blue-500 outline-none"
-                        />
+                        <div className="flex items-center gap-0.5">
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            max="100"
+                            placeholder="0"
+                            value={item.discount}
+                            onChange={(e) => handleBrandItemChange(index, "discount", e.target.value)}
+                            className="w-14 bg-white border border-gray-300 rounded p-0.5 text-xs text-center focus:ring-1 focus:ring-blue-500 outline-none"
+                          />
+                          {hasSameBrandItems && (
+                            <button
+                              type="button"
+                              onClick={() => applyDiscountToBrand(index)}
+                              className="text-gray-400 hover:text-blue-600 transition p-0.5"
+                              title="Apply this discount to all products of the same brand"
+                            >
+                              <FaLocationArrow size={13} />
+                            </button>
+                          )}
+                        </div>
                       </td>
                       <td className="border border-gray-300 px-2 py-1.5 text-center font-mono text-xs text-gray-700">
                         {currentRate.toFixed(2)}
@@ -944,15 +976,27 @@ export default function AddDraftPurchase() {
                         {item.weight || "-"}
                       </td>
                       <td className="border border-gray-300 px-2 py-1.5">
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="0"
-                          value={item.duty}
-                          onChange={(e) => handleBrandItemChange(index, "duty", e.target.value)}
-                          className="w-16 bg-white border border-gray-300 rounded p-0.5 text-xs text-center focus:ring-1 focus:ring-blue-500 outline-none"
-                        />
+                        <div className="flex items-center gap-0.5">
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            placeholder="0"
+                            value={item.duty}
+                            onChange={(e) => handleBrandItemChange(index, "duty", e.target.value)}
+                            className="w-14 bg-white border border-gray-300 rounded p-0.5 text-xs text-center focus:ring-1 focus:ring-blue-500 outline-none"
+                          />
+                          {hasSameBrandItems && (
+                            <button
+                              type="button"
+                              onClick={() => applyDutyToBrand(index)}
+                              className="text-gray-400 hover:text-blue-600 transition p-0.5"
+                              title="Apply this duty to all products of the same brand"
+                            >
+                              <FaLocationArrow size={13} />
+                            </button>
+                          )}
+                        </div>
                       </td>
                       <td className="border border-gray-300 px-2 py-1.5 text-center font-mono text-xs text-gray-700">
                         {netDuty.toFixed(2)}
@@ -985,6 +1029,7 @@ export default function AddDraftPurchase() {
                   );
                 })}
 
+              {/* Manual mode rows */}
               {entryMode === "manual" &&
                 manualItems.map((item, index) => {
                   const selectedProd = products.find((p) => String(p.id) === String(item.product));
@@ -1010,7 +1055,6 @@ export default function AddDraftPurchase() {
                     <tr key={index} className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}>
                       <td className="border border-gray-300 px-2 py-3 text-center text-xs text-gray-500">{index + 1}</td>
 
-                      {/* Part Number search/select */}
                       <td className={`border border-gray-300 px-2 py-3 overflow-visible ${item.showDropdown ? 'relative z-50' : 'relative z-10'}`}>
                         <div ref={(el) => (dropdownRefs.current[index] = el)}>
                           <div className="flex items-center border border-gray-300 rounded bg-white focus-within:ring-1 focus-within:ring-blue-500">
@@ -1075,7 +1119,6 @@ export default function AddDraftPurchase() {
                         </div>
                       </td>
 
-                      {/* Product Name (auto-filled, read-only) */}
                       <td className="border border-gray-300 px-2 py-3 text-xs text-gray-800">
                         {productName || <span className="text-gray-300">-</span>}
                       </td>

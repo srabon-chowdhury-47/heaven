@@ -184,7 +184,8 @@ export default function AddSale() {
 
           const partNumber = product?.part_number || "";
           const productName = item.product_name || product?.product_name || product?.name || "";
-          const searchText = partNumber ? `${partNumber} - ${productName}` : productName;
+          // CHANGED: Only product name in search field
+          const searchText = productName;
           
           // IMPORTANT: Get purchase price from product
           const purchasePrice = product?.purchase_cost_bdt || 0;
@@ -393,9 +394,9 @@ export default function AddSale() {
         newItems[index].purchase_price_bdt = purchasePrice;
         newItems[index].multiplier = "";
         newItems[index].unit_price_bdt = "";
-        const partNum = selectedProduct.part_number || "";
+        // CHANGED: Only the product name in the search field
         const name = selectedProduct.product_name || selectedProduct.name || "";
-        newItems[index].search = partNum ? `${partNum} - ${name}` : name;
+        newItems[index].search = name;
         newItems[index].showDropdown = false;
       }
       if (index === newItems.length - 1) {
@@ -631,7 +632,8 @@ export default function AddSale() {
       const product = products.find((p) => String(p.id) === String(item.product));
       const partNumber = product?.part_number || "";
       const productName = item.product_name || product?.product_name || product?.name || "";
-      const searchText = partNumber ? `${partNumber} - ${productName}` : productName;
+      // CHANGED: Only product name in search field
+      const searchText = productName;
       const purchasePrice = product?.purchase_cost_bdt || 0;
       
       let multiplier = item.multiplier || "";

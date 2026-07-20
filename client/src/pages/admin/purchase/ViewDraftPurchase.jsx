@@ -213,20 +213,27 @@ export default function ViewDraftPurchase() {
   };
 
   const calculateTotals = () => {
-    if (!draft) return { total: 0, totalMrp: 0 };
-    const items = draft.items || [];
-    let totalCost = 0;
-    let totalMrp = 0;
-    items.forEach((item) => {
-      totalCost += parseFloat(item.total_cost_bdt || 0);
-      const qty = parseFloat(item.quantity) || 0;
-      const unitCost = parseFloat(item.unit_cost_bdt) || 0;
-      totalMrp += unitCost * qty;
-    });
-    return { total: totalCost, totalMrp };
-  };
+  if (!draft) return { total: 0, totalMrp: 0 };
+  const items = draft.items || [];
+  let totalCost = 0;
+  let totalMrp = 0;
+  items.forEach((item) => {
+    const unitCost = parseFloat(item.unit_cost_bdt || 0);
+    const discount = parseFloat(item.discount || 0);
+    const duty = parseFloat(item.duty || 0);
+    const qty = parseFloat(item.quantity) || 0;
+    // Use the same helper functions as the rows
+    const weight = getProductWeight(item);        // gets weight from product list
+    const currentRate = calcCurrentRate(unitCost, discount);
+    const netDuty = calcNetDuty(weight, duty);
+    const cost = calcCost(unitCost, discount, weight, duty);
+    totalCost += cost * qty;
+    totalMrp += unitCost * qty;
+  });
+  return { total: totalCost, totalMrp };
+};
 
-  // ── Export to Excel ──
+  // ── Export to Excel (only table data) ──
   const handleExportExcel = () => {
     if (typeof XLSX === "undefined") {
       alert("Excel export library not loaded.");
@@ -236,30 +243,10 @@ export default function ViewDraftPurchase() {
     setExporting(true);
 
     try {
-      const totals = calculateTotals();
-
+      // Build rows: headers + product rows
       const rows = [];
 
-      // Company Header
-      rows.push([COMPANY.name.toUpperCase()]);
-      rows.push([COMPANY.addressLine1]);
-      rows.push([COMPANY.phone]);
-      rows.push([COMPANY.email]);
-      rows.push([]);
-
-      // Draft Bill Title
-      rows.push(["DRAFT PURCHASE BILL"]);
-      rows.push([
-        `Draft #: ${draft?.draft_number || "N/A"}`,
-        `Date: ${formatDateShort(draft?.purchase_date)}`,
-      ]);
-      rows.push([]);
-
-      // Entry By
-      rows.push([`Entry By: ${getEmployeeName(draft?.entry_by)}`]);
-      rows.push([]);
-
-      // Products Table Headers – include all fields
+      // Headers
       const headers = [
         "Sl", "Part No.", "Brand", "Product Name",
         "Weight (kg)", "HS Code",
@@ -269,7 +256,7 @@ export default function ViewDraftPurchase() {
       ];
       rows.push(headers);
 
-      // Product Rows
+      // Product rows
       (draft?.items || []).forEach((item, idx) => {
         const partNumber = getProductPartNumber(item);
         const brandName = getProductBrand(item);
@@ -307,32 +294,11 @@ export default function ViewDraftPurchase() {
         ]);
       });
 
-      rows.push([]);
-      const grandTotalCostRow = [
-        "", "", "", "", "", "",
-        "", "", "", "", "", "",
-        "", "Grand Total Cost", totals.total
-      ];
-      rows.push(grandTotalCostRow);
-      const grandTotalMrpRow = [
-        "", "", "", "", "", "",
-        "", "", "", "", "", "",
-        "", "Grand Total MRP", totals.totalMrp
-      ];
-      rows.push(grandTotalMrpRow);
-
-      if (draft?.remarks) {
-        rows.push([]);
-        rows.push([`Remarks: ${draft.remarks}`]);
-      }
-
-      rows.push([]);
-      rows.push(["✓ This is a draft purchase estimate only. No stock impact."]);
-      rows.push(["** System generated draft – seal & sign not required. **"]);
-
+      // If no items, still export headers only
       const wb = XLSX.utils.book_new();
       const ws = XLSX.utils.aoa_to_sheet(rows);
 
+      // Set column widths
       ws["!cols"] = [
         { wch: 6 },   // Sl
         { wch: 16 },  // Part No.
@@ -351,7 +317,7 @@ export default function ViewDraftPurchase() {
         { wch: 16 },  // Total MRP
       ];
 
-      // Number formatting for currency columns
+      // Apply number formatting to numeric cells
       const range = XLSX.utils.decode_range(ws["!ref"]);
       for (let R = range.s.r; R <= range.e.r; R++) {
         for (let C = range.s.c; C <= range.e.c; C++) {
@@ -364,8 +330,8 @@ export default function ViewDraftPurchase() {
         }
       }
 
-      XLSX.utils.book_append_sheet(wb, ws, "DraftPurchase");
-      const fileName = `DraftPurchase_${draft?.draft_number || "draft"}_${new Date().toISOString().slice(0,10)}.xlsx`;
+      XLSX.utils.book_append_sheet(wb, ws, "DraftPurchaseItems");
+      const fileName = `DraftPurchase_Items_${draft?.draft_number || "draft"}_${new Date().toISOString().slice(0,10)}.xlsx`;
       XLSX.writeFile(wb, fileName);
 
     } catch (err) {
