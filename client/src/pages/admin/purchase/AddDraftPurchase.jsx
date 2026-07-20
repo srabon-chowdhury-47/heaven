@@ -1255,4 +1255,3 @@ export default function AddDraftPurchase() {
     </div>
   );
 } 
-//
