@@ -803,10 +803,7 @@ export default function AddSale() {
         quantity: parseInt(item.quantity, 10),
         unit_price_bdt: parseFloat(item.unit_price_bdt).toFixed(2),
         multiplier: item.multiplier ? parseFloat(item.multiplier).toFixed(2) : null,
-        // NOTE: selected_batch_id is tracked client-side for price lookup/display.
-        // Backend currently always consumes stock FIFO regardless of this value.
-        // Uncomment below once backend supports explicit batch consumption:
-        // batch_id: item.selected_batch_id || null,
+        batch_id: item.selected_batch_id || null,   // ← enable this now
       })),
     };
 
