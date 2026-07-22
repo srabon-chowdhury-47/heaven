@@ -17,9 +17,10 @@ import {
   FiXCircle,
   FiDownload,
   FiTrendingUp,
-  FiFile, // <-- added for Excel icon
+  FiFile,
+  FiLayers,
 } from "react-icons/fi";
-import * as XLSX from "xlsx"; // <-- new import
+import * as XLSX from "xlsx";
 
 // ── Company info shown on the printed bill (edit these) ──
 const COMPANY = {
@@ -87,7 +88,7 @@ export default function ViewSale() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [printing, setPrinting] = useState(false);
-  const [exporting, setExporting] = useState(false); // <-- new state
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     fetchSaleData();
@@ -148,12 +149,12 @@ export default function ViewSale() {
 
   const getEmployeeName = (id) => {
     if (!id) return "Unknown";
-    
+
     const user = users.find((u) => String(u.id) === String(id));
     if (user) {
       return user.full_name || user.username || `User #${user.id}`;
     }
-    
+
     const emp = employees.find((e) => String(e.id) === String(id));
     if (!emp) return "Unknown";
     return emp.first_name
@@ -180,10 +181,45 @@ export default function ViewSale() {
     return brand?.name || "N/A";
   };
 
-  const getProductPurchasePrice = (item) => {
+  // CHANGED: purchase price / "Mrp" column now reflects the ACTUAL batch cost
+  // used for this specific sale line, not the product's current purchase_cost_bdt.
+  // Priority: item.purchase_price_bdt (serializer's resolved cost, prefers
+  // unit_cost_bdt → batch.mrp) → item.batch_mrp directly → item.unit_cost_bdt →
+  // fall back to product's current cost as last resort (e.g. legacy sale rows
+  // created before batch tracking existed).
+  const getSaleItemBatchCost = (item) => {
     if (!item) return 0;
+    if (item.purchase_price_bdt !== undefined && item.purchase_price_bdt !== null) {
+      const v = parseFloat(item.purchase_price_bdt);
+      if (!isNaN(v)) return v;
+    }
+    if (item.unit_cost_bdt !== undefined && item.unit_cost_bdt !== null) {
+      const v = parseFloat(item.unit_cost_bdt);
+      if (!isNaN(v)) return v;
+    }
+    if (item.batch_mrp !== undefined && item.batch_mrp !== null) {
+      const v = parseFloat(item.batch_mrp);
+      if (!isNaN(v)) return v;
+    }
     const product = getProductDetails(item.product);
     return product?.purchase_cost_bdt || 0;
+  };
+
+  // Kept for backward-compat call sites; now just delegates to the batch-aware helper
+  const getProductPurchasePrice = (item) => getSaleItemBatchCost(item);
+
+  // Whether this line has an identifiable batch (for a small "batch" hint in UI)
+  const getSaleItemBatchInfo = (item) => {
+    if (!item) return null;
+    if (item.batch_id) {
+      return {
+        id: item.batch_id,
+        mrp: item.batch_mrp !== undefined && item.batch_mrp !== null
+          ? parseFloat(item.batch_mrp)
+          : getSaleItemBatchCost(item),
+      };
+    }
+    return null;
   };
 
   const getProductName = (item) => {
@@ -241,7 +277,7 @@ export default function ViewSale() {
     if (item.multiplier) {
       return parseFloat(item.multiplier).toFixed(2);
     }
-    const purchasePrice = getProductPurchasePrice(item);
+    const purchasePrice = getSaleItemBatchCost(item);
     const salePrice = parseFloat(item.unit_price_bdt || 0);
     if (purchasePrice > 0 && salePrice > 0) {
       return (salePrice / purchasePrice).toFixed(2);
@@ -298,7 +334,7 @@ export default function ViewSale() {
       // ── Products Table Headers ──
       const headers = [
         "Sl", "Part No.", "Brand", "Product Name",
-        "× (Multiplier)", "Qty", "MRP (INR)", "Price", "Total", "Profit"
+        "× (Multiplier)", "Qty", "Mrp (Batch Cost)", "Price", "Total", "Profit"
       ];
       rows.push(headers);
 
@@ -307,7 +343,7 @@ export default function ViewSale() {
         const partNumber = getProductPartNumber(item);
         const brandName = getProductBrand(item);
         const productName = getProductName(item);
-        const mrp = parseFloat(item.mrp_inr || 0);
+        const mrp = getSaleItemBatchCost(item); // CHANGED: actual batch cost, not item.mrp_inr
         const price = parseFloat(item.unit_price_bdt || 0);
         const total = parseFloat(item.total_price_bdt || 0);
         const profit = parseFloat(item.profit_bdt || 0);
@@ -364,13 +400,13 @@ export default function ViewSale() {
         { wch: 35 },  // Product Name
         { wch: 12 },  // Multiplier
         { wch: 8 },   // Qty
-        { wch: 15 },  // MRP
+        { wch: 16 },  // MRP / Batch Cost
         { wch: 15 },  // Price
         { wch: 18 },  // Total
         { wch: 15 },  // Profit
       ];
 
-      // ── Number formatting for currency columns (columns H, I, J → 0-index: 7,8,9) ──
+      // ── Number formatting for currency columns ──
       const range = XLSX.utils.decode_range(ws["!ref"]);
       for (let R = range.s.r; R <= range.e.r; R++) {
         for (let C = range.s.c; C <= range.e.c; C++) {
@@ -395,7 +431,7 @@ export default function ViewSale() {
     }
   };
 
-  // Print bill (unchanged)
+  // Print bill
   const handlePrint = async () => {
     setPrinting(true);
     try {
@@ -656,7 +692,7 @@ export default function ViewSale() {
                 </thead>
                 <tbody>
                   ${sale?.items?.map((item, index) => {
-                    const mrp = parseFloat(item.mrp_inr || 0);
+                    const mrp = getSaleItemBatchCost(item); // CHANGED: actual batch cost
                     const price = parseFloat(item.unit_price_bdt || 0);
                     const multiplier = getMultiplierDisplay(item);
                     const brandName = getProductBrand(item);
@@ -996,7 +1032,8 @@ export default function ViewSale() {
                   const partNumber = getProductPartNumber(item);
                   const brandName = getProductBrand(item);
                   const productName = getProductName(item);
-                  const mrp = parseFloat(item.mrp_inr || 0);
+                  const mrp = getSaleItemBatchCost(item); // CHANGED: actual batch cost used for this line
+                  const batchInfo = getSaleItemBatchInfo(item);
                   const price = parseFloat(item.unit_price_bdt || 0);
                   const multiplier = getMultiplierDisplay(item);
                   return (
@@ -1027,7 +1064,12 @@ export default function ViewSale() {
                         {item.quantity}
                       </td>
                       <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-xs">
-                        {mrp ? formatCurrency(mrp) : "—"}
+                        <div>{mrp ? formatCurrency(mrp) : "—"}</div>
+                        {batchInfo && (
+                          <div className="flex items-center justify-end gap-0.5 text-[9px] text-gray-400 mt-0.5">
+                            <FiLayers size={8} /> Batch #{batchInfo.id}
+                          </div>
+                        )}
                       </td>
                       <td className="border border-gray-300 px-2 py-1.5 text-right font-mono text-xs">
                         {formatCurrency(item.unit_price_bdt)}

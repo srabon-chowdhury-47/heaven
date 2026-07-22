@@ -718,11 +718,24 @@ export default function AddSale() {
       const productName = item.product_name || product?.product_name || product?.name || "";
       const searchText = productName;
 
-      // Purchase price sourced from stock batches (FIFO default)
+      // Prefer the exact batch the user picked while drafting, IF it still has
+      // stock. Otherwise fall back to current FIFO default. This is why we look
+      // it up against the live batch list rather than trusting item.batch_mrp
+      // blindly — the batch may have been fully sold since the draft was made.
       const batches = getProductBatches(item.product);
-      const defaultBatch = batches.length > 0 ? batches[0] : null;
+      const draftBatch = item.batch_id
+        ? batches.find((b) => String(b.id) === String(item.batch_id))
+        : null;
+      const defaultBatch = draftBatch || (batches.length > 0 ? batches[0] : null);
       const batchPrice = defaultBatch ? parseFloat(defaultBatch.mrp) || 0 : 0;
-      const purchasePrice = batchPrice > 0 ? batchPrice : (product?.purchase_cost_bdt || 0);
+
+      // If the draft's chosen batch is gone but it recorded a price snapshot,
+      // prefer that over silently reverting to today's cheapest/oldest batch —
+      // otherwise fall back to product's last-known cost.
+      const purchasePrice =
+        batchPrice > 0
+          ? batchPrice
+          : (item.batch_mrp ? parseFloat(item.batch_mrp) || 0 : (product?.purchase_cost_bdt || 0));
 
       let multiplier = item.multiplier || "";
       if (!multiplier && purchasePrice > 0 && parseFloat(item.unit_price_bdt) > 0) {

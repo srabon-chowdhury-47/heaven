@@ -1,13 +1,14 @@
 from django.contrib import admin
-from django.forms.models import BaseInlineFormSet
 from .models import DraftSaleOrder, DraftSaleItem
 from stock.models import Stock
+
 
 class DraftSaleItemInline(admin.TabularInline):
     model = DraftSaleItem
     extra = 1
     readonly_fields = ('current_stock_display', 'total_price_bdt', 'profit_bdt')
-    fields = ('product', 'quantity', 'unit_price_bdt', 'multiplier', 'total_price_bdt', 'profit_bdt', 'current_stock_display')
+    fields = ('product', 'batch', 'quantity', 'unit_price_bdt', 'multiplier',
+               'total_price_bdt', 'profit_bdt', 'current_stock_display')
 
     def current_stock_display(self, obj):
         if obj.product:
@@ -17,6 +18,7 @@ class DraftSaleItemInline(admin.TabularInline):
                 return "0"
         return "Save to view"
     current_stock_display.short_description = "Stock Left"
+
 
 @admin.register(DraftSaleOrder)
 class DraftSaleOrderAdmin(admin.ModelAdmin):

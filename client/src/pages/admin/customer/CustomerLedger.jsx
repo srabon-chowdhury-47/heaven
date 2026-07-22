@@ -11,9 +11,7 @@ import {
   FiArrowDown,
   FiCalendar,
   FiX,
-  FiFileText, // for Excel icon
 } from "react-icons/fi";
-import * as XLSX from "xlsx"; // SheetJS library
 
 // ── Company Info for Print ──
 const COMPANY = {
@@ -57,7 +55,7 @@ const formatDate = (dateString) => {
   });
 };
 
-// Helper: short date without time (for print & Excel)
+// Helper: short date without time (for print)
 const formatDateShort = (dateString) => {
   if (!dateString) return "—";
   return new Date(dateString)
@@ -217,6 +215,9 @@ export default function CustomerLedger() {
     }
   };
 
+  // Re-apply filter when dates change (optional, but we keep manual Apply button)
+  // We'll use the Apply button to trigger the filter.
+
   const totalDebit = transactions
     .filter((t) => t.transaction_type === "DEBIT")
     .reduce((sum, t) => sum + (t.amount || 0), 0);
@@ -225,101 +226,11 @@ export default function CustomerLedger() {
     .filter((t) => t.transaction_type === "CREDIT")
     .reduce((sum, t) => sum + (t.amount || 0), 0);
 
-  // ── Helper to get business‑perspective balance ──
-  const getBusinessBalance = (bal) => (bal !== null && bal !== undefined ? -bal : null);
-
-  // ── Export to Excel ──
-  const handleExportExcel = () => {
-    if (!selectedCustomer || transactions.length === 0) return;
-
-    // Prepare data for Excel
-    const rows = [];
-
-    // Header: Company and customer info
-    rows.push([COMPANY.name]);
-    rows.push([COMPANY.addressLine1]);
-    rows.push([COMPANY.phone, COMPANY.email]);
-    rows.push([]); // empty row
-
-    rows.push(["Customer Ledger"]);
-    rows.push([]);
-    rows.push(["Customer:", selectedCustomer.proprietor_name]);
-    if (selectedCustomer.shop_name) {
-      rows.push(["Shop:", selectedCustomer.shop_name]);
-    }
-    rows.push(["Customer ID:", selectedCustomer.customer_id]);
-    rows.push(["Mobile:", selectedCustomer.mobile1]);
-    if (filterApplied) {
-      rows.push([
-        "Period:",
-        startDate ? formatDateShort(startDate) : "Start",
-        "to",
-        endDate ? formatDateShort(endDate) : "End",
-      ]);
-    }
-    rows.push([]); // empty row
-
-    // Table header
-    rows.push(["Sl", "Date", "Description", "Debit (Dr)", "Credit (Cr)", "Balance"]);
-
-    // Data rows (business perspective balance)
-    transactions.forEach((txn, index) => {
-      const isDebit = txn.transaction_type === "DEBIT";
-      const debitAmount = isDebit ? txn.amount : 0;
-      const creditAmount = !isDebit ? txn.amount : 0;
-      const businessBal = -txn.running_balance;
-      rows.push([
-        index + 1,
-        formatDateShort(txn.transaction_date),
-        txn.description || (isDebit ? "Sale" : "Payment"),
-        debitAmount,
-        creditAmount,
-        businessBal,
-      ]);
-    });
-
-    // Totals row
-    const businessBalanceTotal = getBusinessBalance(balance);
-    rows.push([
-      "",
-      "",
-      "TOTAL",
-      totalDebit,
-      totalCredit,
-      businessBalanceTotal,
-    ]);
-
-    // Create worksheet
-    const wb = XLSX.utils.book_new();
-    const ws = XLSX.utils.aoa_to_sheet(rows);
-
-    // Auto-column widths (optional)
-    ws["!cols"] = [
-      { wch: 8 },   // Sl
-      { wch: 15 },  // Date
-      { wch: 40 },  // Description
-      { wch: 15 },  // Debit
-      { wch: 15 },  // Credit
-      { wch: 15 },  // Balance
-    ];
-
-    XLSX.utils.book_append_sheet(wb, ws, "Ledger");
-
-    // Generate file name
-    const fileName = `Customer_Ledger_${selectedCustomer.proprietor_name}_${new Date().toISOString().slice(0,10)}.xlsx`;
-    XLSX.writeFile(wb, fileName);
-  };
-
-  // ── Print Function (unchanged, balance negated) ──
+  // Print Function — no time, no color, no reference numbers, only TOTAL row bold with commas
   const handlePrint = () => {
     if (!selectedCustomer || transactions.length === 0) return;
 
     const printWin = window.open("", "", "width=1000,height=800");
-
-    // Compute business totals for print
-    const businessTotalDebit = totalDebit;
-    const businessTotalCredit = totalCredit;
-    const businessBalance = getBusinessBalance(balance);
 
     printWin.document.write(`
       <html>
@@ -525,19 +436,19 @@ export default function CustomerLedger() {
                     <td class="num">
                       ${txn.transaction_type === "CREDIT" ? formatNumberPlain(txn.amount) : "-"}
                     </td>
-                    <td class="num">${formatNumberPlain(-txn.running_balance)}</td>
+                    <td class="num">${formatNumberPlain(txn.running_balance)}</td>
                   </tr>
                 `).join("")}
                 <tr>
                   <td colspan="3" class="totals-label" style="font-weight:bold;">TOTAL</td>
-                  <td class="num" style="font-weight:bold;">${formatNumber(businessTotalDebit)}</td>
-                  <td class="num" style="font-weight:bold;">${formatNumber(businessTotalCredit)}</td>
-                  <td class="num" style="font-weight:bold;">${formatNumber(businessBalance)}</td>
+                  <td class="num" style="font-weight:bold;">${formatNumber(totalDebit)}</td>
+                  <td class="num" style="font-weight:bold;">${formatNumber(totalCredit)}</td>
+                  <td class="num" style="font-weight:bold;">${formatNumber(balance)}</td>
                 </tr>
               </tbody>
             </table>
 
-            <div class="received-note"><b>Current Balance: ${formatAmount(businessBalance)}</b></div>
+            <div class="received-note"><b>Current Balance: ${formatAmount(balance)}</b></div>
 
             <div class="system-note">
               ** This is a system generated document, seal &amp; sign are not mandatory. **
@@ -563,17 +474,6 @@ export default function CustomerLedger() {
     );
   }
 
-  // ── Business‑perspective balance for display ──
-  const businessBalance = getBusinessBalance(balance);
-  const statusLabel =
-    businessBalance > 0 ? "Due" : businessBalance < 0 ? "Overpaid" : "Settled";
-  const statusColor =
-    businessBalance > 0
-      ? "text-red-600"   // due → red
-      : businessBalance < 0
-      ? "text-green-600" // overpaid → green
-      : "text-gray-600";
-
   return (
     <div className="max-w-7xl mx-auto p-3 bg-gray-50 min-h-screen">
       <style>
@@ -591,20 +491,12 @@ export default function CustomerLedger() {
           <FiDollarSign className="text-blue-600" /> Customer Ledger
         </h1>
         {selectedCustomer && transactions.length > 0 && (
-          <div className="flex gap-2 no-print">
-            <button
-              onClick={handleExportExcel}
-              className="bg-green-600 hover:bg-green-700 text-white px-3 py-1.5 rounded text-sm font-semibold transition flex items-center gap-1.5 border border-green-700"
-            >
-              <FiFileText size={16} /> Export Excel
-            </button>
-            <button
-              onClick={handlePrint}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm font-semibold transition flex items-center gap-1.5 border border-blue-700"
-            >
-              <FiPrinter size={16} /> Print / PDF
-            </button>
-          </div>
+          <button
+            onClick={handlePrint}
+            className="no-print bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm font-semibold transition flex items-center gap-1.5 border border-blue-700"
+          >
+            <FiPrinter size={16} /> Print / PDF
+          </button>
         )}
       </div>
 
@@ -728,10 +620,12 @@ export default function CustomerLedger() {
                 <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">
                   Current Balance
                 </p>
-                <p className={`text-lg font-bold ${statusColor}`}>
-                  {businessBalance !== null ? formatAmount(businessBalance) : "—"}
+                <p className={`text-lg font-bold ${balance > 0 ? "text-green-600" : balance < 0 ? "text-red-600" : "text-gray-600"}`}>
+                  {balance !== null ? formatAmount(balance) : "—"}
                 </p>
-                <p className="text-xs text-gray-400">{statusLabel}</p>
+                <p className="text-xs text-gray-400">
+                  {balance > 0 ? "Overpaid" : balance < 0 ? "Due" : "Settled"}
+                </p>
               </div>
             </div>
           </div>
@@ -749,8 +643,8 @@ export default function CustomerLedger() {
             </div>
             <div className="text-right">
               <p className="text-xs text-gray-500">Balance</p>
-              <p className={`text-sm font-bold ${statusColor}`}>
-                {businessBalance !== null ? formatAmount(businessBalance) : "—"}
+              <p className={`text-sm font-bold ${balance > 0 ? "text-green-600" : balance < 0 ? "text-red-600" : "text-gray-600"}`}>
+                {balance !== null ? formatAmount(balance) : "—"}
               </p>
             </div>
           </div>
@@ -803,7 +697,7 @@ export default function CustomerLedger() {
                           {txn.transaction_type === "CREDIT" ? formatNumber(txn.amount) : "-"}
                         </td>
                         <td className="border border-gray-300 px-2 py-1.5 text-xs text-right font-semibold">
-                          {formatNumber(-txn.running_balance)}
+                          {formatNumber(txn.running_balance)}
                         </td>
                       </tr>
                     ))}
@@ -811,7 +705,7 @@ export default function CustomerLedger() {
                       <td colSpan="3" className="border border-gray-300 px-2 py-1.5 text-xs text-right">TOTAL</td>
                       <td className="border border-gray-300 px-2 py-1.5 text-xs text-right text-red-600">{formatNumber(totalDebit)}</td>
                       <td className="border border-gray-300 px-2 py-1.5 text-xs text-right text-green-600">{formatNumber(totalCredit)}</td>
-                      <td className="border border-gray-300 px-2 py-1.5 text-xs text-right font-bold">{formatNumber(businessBalance)}</td>
+                      <td className="border border-gray-300 px-2 py-1.5 text-xs text-right font-bold">{formatNumber(balance)}</td>
                     </tr>
                   </tbody>
                 </table>
