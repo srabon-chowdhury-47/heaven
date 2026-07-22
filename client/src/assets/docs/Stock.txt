@@ -1,0 +1,895 @@
+in my backend >>
+
+app name : stock >
+admin : 
+from django.contrib import admin
+from .models import Stock
+
+@admin.register(Stock)
+class StockAdmin(admin.ModelAdmin):
+    list_display = ('product', 'current_quantity', 'last_updated')
+    search_fields = ('product__product_name', 'product__part_number')
+    
+    # Block editing entirely from the Django panel
+    readonly_fields = ('product', 'current_quantity', 'last_updated') 
+    
+    def has_add_permission(self, request):
+        return False # Hide the "Add Stock" button
+
+models :
+from django.db import models
+from products.models import Product
+
+class Stock(models.Model):
+    product = models.OneToOneField(Product, on_delete=models.CASCADE, related_name='inventory_stock')
+    current_quantity = models.IntegerField(default=0)
+    last_updated = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.product.product_name}: {self.current_quantity} in stock"
+
+serializers :
+from rest_framework import serializers
+from .models import Stock
+
+class StockSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source='product.product_name', read_only=True)
+    brand = serializers.CharField(source='product.brand', read_only=True)
+    part_number = serializers.CharField(source='product.part_number', read_only=True)
+
+    class Meta:
+        model = Stock
+        fields = '__all__'
+
+signals.py :
+from django.db.models.signals import pre_save, post_save, post_delete
+from django.dispatch import receiver
+from products.models import Product
+from purchase.models import PurchaseItem
+from sale.models import SaleItem
+from .models import Stock
+
+# 1. Create 0 stock when a brand new product is added to the catalog
+@receiver(post_save, sender=Product)
+def initialize_stock(sender, instance, created, **kwargs):
+    if created:
+        Stock.objects.create(product=instance, current_quantity=0)
+
+# 2. Add to stock when a PurchaseItem is saved
+@receiver(pre_save, sender=PurchaseItem)
+def capture_old_purchase_qty(sender, instance, **kwargs):
+    if instance.pk:
+        instance._old_quantity = PurchaseItem.objects.get(pk=instance.pk).quantity
+    else:
+        instance._old_quantity = 0
+
+@receiver(post_save, sender=PurchaseItem)
+def add_to_stock(sender, instance, created, **kwargs):
+    stock, _ = Stock.objects.get_or_create(product=instance.product)
+    if created:
+        stock.current_quantity += instance.quantity
+    else:
+        difference = instance.quantity - getattr(instance, '_old_quantity', 0)
+        stock.current_quantity += difference
+    stock.save()
+
+@receiver(post_delete, sender=PurchaseItem)
+def revert_stock_on_purchase_delete(sender, instance, **kwargs):
+    try:
+        stock = Stock.objects.get(product=instance.product)
+        stock.current_quantity -= instance.quantity
+        stock.save()
+    except Stock.DoesNotExist:
+        pass
+
+# 3. Deduct from stock when a SaleItem is saved
+@receiver(pre_save, sender=SaleItem)
+def capture_old_sale_qty(sender, instance, **kwargs):
+    if instance.pk:
+        instance._old_quantity = SaleItem.objects.get(pk=instance.pk).quantity
+    else:
+        instance._old_quantity = 0
+
+@receiver(post_save, sender=SaleItem)
+def deduct_from_stock(sender, instance, created, **kwargs):
+    stock, _ = Stock.objects.get_or_create(product=instance.product)
+    if created:
+        stock.current_quantity -= instance.quantity
+    else:
+        difference = instance.quantity - getattr(instance, '_old_quantity', 0)
+        stock.current_quantity -= difference
+    stock.save()
+
+@receiver(post_delete, sender=SaleItem)
+def revert_stock_on_sale_delete(sender, instance, **kwargs):
+    try:
+        stock = Stock.objects.get(product=instance.product)
+        stock.current_quantity += instance.quantity
+        stock.save()
+    except Stock.DoesNotExist:
+        pass
+
+urls :
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from .views import StockViewSet
+
+router = DefaultRouter()
+router.register(r'stocks', StockViewSet, basename='stock')
+
+urlpatterns = [
+    path('', include(router.urls)),
+]
+
+views :
+from rest_framework import viewsets
+from .models import Stock
+from .serializers import StockSerializer
+
+# Use ReadOnlyModelViewSet so React can ONLY GET stock data, not POST/PUT
+class StockViewSet(viewsets.ReadOnlyModelViewSet): 
+    queryset = Stock.objects.all().order_by('product__product_name')
+    serializer_class = StockSerializer
+
+
+
+app name : purchase >
+admin :
+# purchase/admin.py
+from django.contrib import admin
+from django.contrib import messages
+from .models import PurchaseOrder, PurchaseItem
+
+class PurchaseItemInline(admin.TabularInline):
+    model = PurchaseItem
+    extra = 1
+    readonly_fields = ('total_cost_bdt',)
+    
+    def save_model(self, request, obj, form, change):
+        """Override to ensure product cost update when saving from admin"""
+        super().save_model(request, obj, form, change)
+        # Product cost will be updated via the model's save() method
+
+@admin.register(PurchaseOrder)
+class PurchaseOrderAdmin(admin.ModelAdmin):
+    list_display = ('po_number', 'supplier', 'total_amount', 'payment_status', 'purchase_date')
+    search_fields = ('po_number', 'supplier__name')
+    list_filter = ('payment_status',)
+    readonly_fields = ('po_number', 'total_amount')
+    inlines = [PurchaseItemInline]
+    
+    def save_model(self, request, obj, form, change):
+        """Override to ensure product cost update when saving from admin"""
+        super().save_model(request, obj, form, change)
+        messages.success(request, f"Purchase Order {obj.po_number} saved successfully!")
+
+models :
+# purchase/models.py
+import uuid
+from django.db import models
+from products.models import Product
+from supplier.models import Supplier
+
+class PurchaseOrder(models.Model):
+    # Master Record
+    po_number = models.CharField(max_length=20, unique=True, editable=False)
+    entry_by = models.CharField(max_length=100, blank=True, null=True)  # Changed to CharField
+    supplier = models.ForeignKey(Supplier, on_delete=models.PROTECT, related_name='purchase_orders', null=True, blank=True) 
+    
+    purchase_date = models.DateTimeField(auto_now_add=True)
+    remarks = models.TextField(blank=True, null=True)
+
+    # --- Simplified Financials ---
+    total_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0.00, editable=False)
+    payment_status = models.CharField(max_length=50, default="Unpaid")
+
+    def save(self, *args, **kwargs):
+        if not self.po_number:
+            self.po_number = f"PO-{uuid.uuid4().hex[:6].upper()}"
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.po_number} - {self.supplier.name if self.supplier else 'Unknown'}"
+
+
+class PurchaseItem(models.Model):
+    # Detail Record
+    purchase_order = models.ForeignKey(PurchaseOrder, on_delete=models.CASCADE, related_name='items')
+    product = models.ForeignKey(Product, on_delete=models.PROTECT) 
+    
+    quantity = models.PositiveIntegerField()
+    unit_cost_bdt = models.DecimalField(max_digits=12, decimal_places=2)
+    total_cost_bdt = models.DecimalField(max_digits=14, decimal_places=2, editable=False)
+
+    def save(self, *args, **kwargs):
+        # Calculate total cost
+        self.total_cost_bdt = float(self.unit_cost_bdt) * float(self.quantity)
+        
+        # Save the purchase item
+        super().save(*args, **kwargs)
+        
+        # 🔥 UPDATE PRODUCT PURCHASE COST 🔥
+        try:
+            product = self.product
+            # Update the product's purchase cost with the new unit cost
+            product.purchase_cost_bdt = self.unit_cost_bdt
+            product.save(update_fields=['purchase_cost_bdt'])
+        except Product.DoesNotExist:
+            pass  # Product might have been deleted
+
+    def __str__(self):
+        return f"{self.quantity}x {self.product.product_name}"
+
+serializers :
+# purchase/serializers.py
+from rest_framework import serializers
+from .models import PurchaseOrder, PurchaseItem
+from products.models import Product
+
+class PurchaseItemSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source='product.product_name', read_only=True)
+    part_number = serializers.CharField(source='product.part_number', read_only=True)
+
+    class Meta:
+        model = PurchaseItem
+        fields = ['id', 'product', 'product_name', 'part_number', 'quantity', 'unit_cost_bdt', 'total_cost_bdt']
+        read_only_fields = ['total_cost_bdt']
+
+    def create(self, validated_data):
+        """Create purchase item and update product cost"""
+        # Create the purchase item
+        purchase_item = PurchaseItem.objects.create(**validated_data)
+        
+        # Update product cost (already handled in PurchaseItem.save())
+        # But we can also do it here explicitly
+        return purchase_item
+
+
+class PurchaseOrderSerializer(serializers.ModelSerializer):
+    items = PurchaseItemSerializer(many=True)
+    entry_by_name = serializers.CharField(source='entry_by.name', read_only=True)
+
+    class Meta:
+        model = PurchaseOrder
+        fields = '__all__'
+        read_only_fields = ['po_number', 'total_amount', 'payment_status']
+
+    def create(self, validated_data):
+        items_data = validated_data.pop('items')
+        
+        # 1. Calculate the exact grand total from the incoming items
+        total_amount = sum(float(item['unit_cost_bdt']) * item['quantity'] for item in items_data)
+        validated_data['total_amount'] = total_amount
+        
+        # 2. Create Master Order
+        purchase_order = PurchaseOrder.objects.create(**validated_data)
+        
+        # 3. Create Items (this will trigger the product cost update via PurchaseItem.save())
+        for item_data in items_data:
+            PurchaseItem.objects.create(purchase_order=purchase_order, **item_data)
+            
+        return purchase_order
+
+    def update(self, instance, validated_data):
+        # Get items data from validated_data (if provided)
+        items_data = validated_data.pop('items', [])
+        
+        # Update the purchase order fields (excluding items)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        
+        # Recalculate total amount from items if items are provided
+        if items_data:
+            # Calculate total from the new items
+            total_amount = sum(float(item['unit_cost_bdt']) * item['quantity'] for item in items_data)
+            instance.total_amount = total_amount
+        
+        # Save the purchase order instance
+        instance.save()
+        
+        # Handle items - clear existing and create new ones
+        if items_data:
+            # Delete all existing items for this purchase order
+            instance.items.all().delete()
+            
+            # Create new items (this will trigger product cost update)
+            for item_data in items_data:
+                PurchaseItem.objects.create(purchase_order=instance, **item_data)
+        
+        return instance
+
+signals:
+# purchase/signals.py
+from django.db.models.signals import post_save, post_delete, m2m_changed
+from django.dispatch import receiver
+from .models import PurchaseItem, PurchaseOrder
+from products.models import Product
+
+@receiver(post_save, sender=PurchaseItem)
+def update_product_purchase_cost_on_save(sender, instance, created, **kwargs):
+    """
+    Update product's purchase cost when purchase item is saved
+    This works alongside the save() method override for extra safety
+    """
+    try:
+        product = instance.product
+        # Only update if the unit cost has changed
+        if product.purchase_cost_bdt != instance.unit_cost_bdt:
+            product.purchase_cost_bdt = instance.unit_cost_bdt
+            product.save(update_fields=['purchase_cost_bdt'])
+            print(f"✅ Updated {product.part_number} purchase cost to {instance.unit_cost_bdt} BDT")
+    except Product.DoesNotExist:
+        pass
+
+@receiver(post_delete, sender=PurchaseItem)
+def handle_product_cost_on_item_delete(sender, instance, **kwargs):
+    """
+    When a purchase item is deleted, optionally revert to latest purchase cost
+    """
+    try:
+        product = instance.product
+        # Get the latest purchase for this product
+        latest_purchase = PurchaseItem.objects.filter(
+            product=product
+        ).exclude(id=instance.id).order_by('-purchase_order__purchase_date').first()
+        
+        if latest_purchase:
+            # Update to the latest available purchase cost
+            product.purchase_cost_bdt = latest_purchase.unit_cost_bdt
+        else:
+            # No purchase history, set to 0
+            product.purchase_cost_bdt = 0
+        product.save(update_fields=['purchase_cost_bdt'])
+    except Product.DoesNotExist:
+        pass
+
+
+views :
+from rest_framework import viewsets
+from .models import PurchaseOrder
+from .serializers import PurchaseOrderSerializer
+
+class PurchaseOrderViewSet(viewsets.ModelViewSet):
+    queryset = PurchaseOrder.objects.all().order_by('-purchase_date')
+    serializer_class = PurchaseOrderSerializer
+
+
+app name : sale >
+admin :
+from django.contrib import admin
+from django.core.exceptions import ValidationError
+from django.forms.models import BaseInlineFormSet
+from .models import SaleOrder, SaleItem
+from stock.models import Stock
+
+# --- ADMIN SECURITY: Block over-selling from the Dashboard ---
+class SaleItemFormSet(BaseInlineFormSet):
+    def clean(self):
+        super().clean()
+        for form in self.forms:
+            # Skip if the form has basic errors or is marked for deletion
+            if not form.is_valid() or form.cleaned_data.get('DELETE'):
+                continue
+                
+            product = form.cleaned_data.get('product')
+            requested_qty = form.cleaned_data.get('quantity')
+            
+            if product and requested_qty:
+                # If editing an existing sale, calculate the true available stock
+                instance = form.instance
+                old_qty = 0
+                if instance.pk:
+                    old_qty = SaleItem.objects.get(pk=instance.pk).quantity
+                
+                try:
+                    stock = Stock.objects.get(product=product)
+                    # Real availability = what's on the shelf right now + what was already reserved for this exact order line
+                    true_available = stock.current_quantity + old_qty
+                    
+                    if true_available < requested_qty:
+                        raise ValidationError(
+                            f"Over-sell Alert! You only have {true_available}x '{product.product_name}' available to sell."
+                        )
+                except Stock.DoesNotExist:
+                    raise ValidationError(f"No stock record found for {product.product_name}.")
+
+
+class SaleItemInline(admin.TabularInline):
+    model = SaleItem
+    extra = 1
+    formset = SaleItemFormSet  # Attach the security check
+    
+    # Add our custom stock display column
+    readonly_fields = ('current_stock_display', 'total_price_bdt', 'profit_bdt')
+    fields = ('product', 'quantity', 'unit_price_bdt', 'multiplier', 'total_price_bdt', 'profit_bdt', 'current_stock_display')
+    
+    # Custom column to show live stock
+    def current_stock_display(self, obj):
+        if obj.product:
+            try:
+                return obj.product.inventory_stock.current_quantity
+            except:
+                return "0"
+        return "Save to view"
+    
+    current_stock_display.short_description = "Stock Left"
+
+
+@admin.register(SaleOrder)
+class SaleOrderAdmin(admin.ModelAdmin):
+    list_display = ('invoice_number', 'customer', 'total_amount', 'payment_status', 'sale_date')
+    search_fields = ('invoice_number', 'customer__proprietor_name', 'customer__shop_name')
+    list_filter = ('payment_status',)
+    
+    readonly_fields = ('invoice_number', 'total_amount')
+    inlines = [SaleItemInline]
+
+models :
+import uuid
+from django.db import models
+from products.models import Product
+from person.models import Employee, Customer
+
+class SaleOrder(models.Model):
+    # Master Record
+    invoice_number = models.CharField(max_length=20, unique=True, editable=False)
+    sold_by = models.CharField(max_length=100, blank=True, null=True, 
+                               help_text="Name of the person who made the sale")
+    customer = models.ForeignKey(Customer, on_delete=models.SET_NULL, null=True, blank=True, related_name='purchase_history')
+    
+    sale_date = models.DateTimeField(auto_now_add=True)
+    remarks = models.TextField(blank=True, null=True)
+
+    # --- Simplified Financials ---
+    total_amount = models.DecimalField(max_digits=14, decimal_places=2, default=0.00, editable=False)
+    payment_status = models.CharField(max_length=50, default="Unpaid")
+
+    def save(self, *args, **kwargs):
+        if not self.invoice_number:
+            self.invoice_number = f"INV-{uuid.uuid4().hex[:6].upper()}"
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.invoice_number} - {self.customer.proprietor_name if self.customer else 'Walk-in'}"
+
+class SaleItem(models.Model):
+    # Detail Record
+    sale_order = models.ForeignKey(SaleOrder, on_delete=models.CASCADE, related_name='items')
+    product = models.ForeignKey(Product, on_delete=models.PROTECT)
+    
+    quantity = models.PositiveIntegerField()
+    unit_price_bdt = models.DecimalField(max_digits=12, decimal_places=2)
+    multiplier = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, 
+                                    help_text="Multiplier used to calculate sale price from purchase price")
+    total_price_bdt = models.DecimalField(max_digits=14, decimal_places=2, editable=False)
+
+    # Automated Profit Tracking
+    profit_bdt = models.DecimalField(max_digits=14, decimal_places=2, editable=False, null=True, blank=True)
+
+    def save(self, *args, **kwargs):
+        self.total_price_bdt = float(self.unit_price_bdt) * float(self.quantity)
+        
+        # Calculate exactly how much profit this specific item made
+        if self.product and self.product.purchase_cost_bdt:
+            total_purchase_cost = float(self.product.purchase_cost_bdt) * float(self.quantity)
+            self.profit_bdt = self.total_price_bdt - total_purchase_cost
+
+        super().save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.quantity}x {self.product.product_name}"
+
+
+serializers :
+from rest_framework import serializers
+from .models import SaleOrder, SaleItem
+from stock.models import Stock
+
+class SaleItemSerializer(serializers.ModelSerializer):
+    product_name = serializers.CharField(source='product.product_name', read_only=True)
+    part_number = serializers.CharField(source='product.part_number', read_only=True)
+    purchase_price_bdt = serializers.DecimalField(source='product.purchase_cost_bdt', max_digits=12, decimal_places=2, read_only=True)
+
+    class Meta:
+        model = SaleItem
+        fields = ['id', 'product', 'product_name', 'part_number', 'purchase_price_bdt',
+                 'quantity', 'unit_price_bdt', 'multiplier', 'total_price_bdt', 'profit_bdt']
+        read_only_fields = ['total_price_bdt', 'profit_bdt']
+
+class SaleOrderSerializer(serializers.ModelSerializer):
+    items = SaleItemSerializer(many=True)
+    sold_by_name = serializers.CharField(source='sold_by.name', read_only=True)
+    customer_name = serializers.CharField(source='customer.proprietor_name', read_only=True)
+
+    class Meta:
+        model = SaleOrder
+        fields = '__all__'
+        read_only_fields = ['invoice_number', 'total_amount', 'payment_status']
+
+    def validate(self, data):
+        """
+        SECURITY CHECK: Prevent selling products if there is not enough stock.
+        """
+        items = data.get('items', [])
+        for item in items:
+            product = item['product']
+            requested_qty = item['quantity']
+
+            try:
+                stock = Stock.objects.get(product=product)
+                if stock.current_quantity < requested_qty:
+                    raise serializers.ValidationError(
+                        f"Not enough stock for {product.product_name}. Available: {stock.current_quantity}, Requested: {requested_qty}."
+                    )
+            except Stock.DoesNotExist:
+                raise serializers.ValidationError(
+                    f"No stock record found for {product.product_name}. You must purchase it first."
+                )
+
+        return data
+
+    def create(self, validated_data):
+        items_data = validated_data.pop('items')
+        
+        # Auto-sum the grand total based on the items sent from React
+        total_amount = sum(float(item['unit_price_bdt']) * item['quantity'] for item in items_data)
+        validated_data['total_amount'] = total_amount
+
+        sale_order = SaleOrder.objects.create(**validated_data)
+        
+        for item_data in items_data:
+            # Extract multiplier if provided
+            multiplier = item_data.pop('multiplier', None)
+            sale_item = SaleItem.objects.create(sale_order=sale_order, **item_data)
+            # If multiplier was provided, update it
+            if multiplier is not None:
+                sale_item.multiplier = multiplier
+                sale_item.save()
+            
+        return sale_order
+
+    def update(self, instance, validated_data):
+        # Remove items from validated_data – handle them manually
+        items_data = validated_data.pop('items', [])
+
+        # Update the sale order fields (except read-only ones)
+        for attr, value in validated_data.items():
+            setattr(instance, attr, value)
+        
+        # Recalculate total_amount from the incoming items
+        total_amount = sum(float(item['unit_price_bdt']) * item['quantity'] for item in items_data)
+        instance.total_amount = total_amount
+        instance.save()
+
+        # Get existing item IDs
+        existing_item_ids = list(instance.items.values_list('id', flat=True))
+        new_item_ids = []
+
+        for item_data in items_data:
+            # Extract multiplier if provided
+            multiplier = item_data.pop('multiplier', None)
+            item_id = item_data.get('id', None)
+            
+            if item_id:
+                # Update existing item
+                try:
+                    item = SaleItem.objects.get(id=item_id, sale_order=instance)
+                    # Update fields except 'id' and read-only ones
+                    for attr, value in item_data.items():
+                        if attr not in ['id', 'total_price_bdt', 'profit_bdt']:
+                            setattr(item, attr, value)
+                    if multiplier is not None:
+                        item.multiplier = multiplier
+                    item.save()
+                    new_item_ids.append(item.id)
+                except SaleItem.DoesNotExist:
+                    # If ID provided but not found, treat as a new item
+                    item = SaleItem.objects.create(sale_order=instance, **item_data)
+                    if multiplier is not None:
+                        item.multiplier = multiplier
+                        item.save()
+                    new_item_ids.append(item.id)
+            else:
+                # Create new item
+                item = SaleItem.objects.create(sale_order=instance, **item_data)
+                if multiplier is not None:
+                    item.multiplier = multiplier
+                    item.save()
+                new_item_ids.append(item.id)
+
+        # Delete items that are no longer present
+        for item_id in existing_item_ids:
+            if item_id not in new_item_ids:
+                SaleItem.objects.filter(id=item_id).delete()
+
+        return instance
+
+views :
+from rest_framework import viewsets
+from .models import SaleOrder
+from .serializers import SaleOrderSerializer
+
+class SaleOrderViewSet(viewsets.ModelViewSet):
+    queryset = SaleOrder.objects.all().order_by('-sale_date')
+    serializer_class = SaleOrderSerializer
+
+
+app name : products >
+admin :
+from django.contrib import admin
+from .models import Product
+
+class ProductAdmin(admin.ModelAdmin):
+    # --- 1. The Master Table View (All Fields Visible) ---
+    list_display = (
+        'product_id', 'part_number', 'product_name', 'brand', 'weight', 'category', 
+        'source', 'product_status', 'stock_status',
+        'purchase_cost_bdt', 'wholesale_price_bdt', 'retail_price_bdt', 
+        'mrp_inr', 'markup_percentage', 
+        'unit', 'alternative_units', 'barcode', 
+        'min_stock_level', 'reorder_point', 'max_stock_level',
+        'warranty_period', 'vat_code'
+    )
+    
+    # --- 2. Search & Filtering ---
+    search_fields = ('product_id', 'part_number', 'product_name', 'brand', 'barcode')
+    list_filter = ('source', 'product_status', 'brand', 'category')
+    
+    # Set auto-generated fields to read-only so Django doesn't hide them
+    readonly_fields = ('product_id',)
+
+    # --- 3. The Detail/Edit View (Organized into Cards) ---
+    fieldsets = (
+        ('Core Identification', {
+            'fields': ('product_id', 'part_number', 'product_name', 'brand', 'category', 'barcode')
+        }),
+        ('Sourcing & Import Details', {
+            'fields': ('source', 'hs_code')
+        }),
+        ('Pricing & Costs', {
+            'fields': (
+                'mrp_inr', 'mrp_bdt', 'purchase_cost_bdt', 
+                'markup_percentage', 'wholesale_price_bdt', 'retail_price_bdt'
+            )
+        }),
+        ('Stock Management', {
+            'fields': ('min_stock_level', 'max_stock_level', 'reorder_point')
+        }),
+        ('Units & Compatibility', {
+            'fields': ('unit', 'alternative_units', 'vehicle_compatibility')
+        }),
+        ('Status & Condition', {
+            'fields': ('product_status', 'damage_discount_price', 'damage_remark')
+        }),
+        ('Taxes & Warranty', {
+            'fields': ('vat_code', 'warranty_period')
+        }),
+        ('Product Media', {
+            'fields': ('image_1', 'image_2', 'image_3', 'image_4', 'image_5'),
+            'classes': ('collapse',) # Keeps images tucked away until clicked
+        }),
+    )
+
+    # Custom column to quickly see if stock is critically low based on your reorder point
+    def stock_status(self, obj):
+        # Note: Since actual current stock tracking will be handled by your inventory app later,
+        # this is a placeholder to show how you can inject custom logic into the admin table.
+        return f"Min: {obj.min_stock_level} / Trigger: {obj.reorder_point}"
+    stock_status.short_description = "Stock Rules"
+
+# Register the model to the admin panel
+admin.site.register(Product, ProductAdmin)
+
+models :
+from django.db import models
+from brand.models import Brand
+import uuid
+
+class Product(models.Model):
+    # --- 1. Core Identification ---
+    product_id = models.CharField(max_length=20, unique=True, editable=False, null=True, blank=True, help_text="Auto-generated system ID")
+    part_number = models.CharField(max_length=100, unique=True, help_text="Manufacturer's part number (Primary Identifier)")  # REQUIRED
+    product_name = models.CharField(max_length=255, null=True, blank=True, help_text="Full descriptive name")
+    brand = models.ForeignKey(Brand, on_delete=models.SET_NULL, null=True, blank=True, related_name='products', help_text="Select the Brand (e.g., Yamaha, Suzuki)")
+    category = models.CharField(max_length=100, null=True, blank=True, help_text="Category > Sub-Category hierarchy")
+    weight = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, help_text="Weight in kg or g")
+
+    # --- 2. Sourcing & Import Details ---
+    SOURCE_CHOICES = [
+        ('Import', 'Import (India)'),
+        ('Local', 'Local Purchase')
+    ]
+    source = models.CharField(max_length=20, choices=SOURCE_CHOICES, default='Local', null=True, blank=True, help_text="Determines pricing rules")
+    hs_code = models.CharField(max_length=50, blank=True, null=True, help_text="Customs HS code for import")
+    
+    # --- 3. Pricing & Costs ---
+    mrp_inr = models.DecimalField(max_digits=10, decimal_places=2, default=0.00, null=True, blank=True, help_text="Maximum Retail Price in Indian Rupee")
+    mrp_bdt = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True, help_text="MRP converted to BDT")
+    purchase_cost_bdt = models.DecimalField(max_digits=10, decimal_places=2, default=0.00, help_text="Landed cost or local purchase cost")  # REQUIRED
+    markup_percentage = models.DecimalField(max_digits=5, decimal_places=2, default=0.00, null=True, blank=True, help_text="Markup % on INR (for imports)")
+    wholesale_price_bdt = models.DecimalField(max_digits=10, decimal_places=2, default=0.00, null=True, blank=True, help_text="Selling price for wholesale dealers")
+    retail_price_bdt = models.DecimalField(max_digits=10, decimal_places=2, default=0.00, null=True, blank=True, help_text="Selling price for retail customers")
+
+    # --- 4. Units & Barcode ---
+    unit = models.CharField(max_length=50, default='piece', null=True, blank=True, help_text="Primary unit (piece, set, box)")
+    alternative_units = models.CharField(max_length=100, blank=True, null=True, help_text="e.g., 1 box = 12 pieces")
+    barcode = models.CharField(max_length=100, unique=True, null=True, blank=True, help_text="EAN-13 or custom barcode")
+
+    # --- 5. Taxes, Warranty & Compatibility ---
+    warranty_period = models.IntegerField(default=0, null=True, blank=True, help_text="Warranty period in months")
+    vat_code = models.CharField(max_length=50, null=True, blank=True, help_text="Applicable VAT rate code")
+    vehicle_compatibility = models.TextField(blank=True, null=True, help_text="Make, Model, Year Range (e.g., Honda CB 125, 2018-2024)")
+
+    # --- 6. Stock Management ---
+    min_stock_level = models.IntegerField(default=5, null=True, blank=True, help_text="Reorder alert threshold per warehouse")
+    max_stock_level = models.IntegerField(blank=True, null=True, help_text="Overstock warning level")
+    reorder_point = models.IntegerField(default=5, null=True, blank=True, help_text="Trigger for purchase requisition")
+
+    # --- 7. Status & Condition ---
+    STATUS_CHOICES = [
+        ('Active', 'Active'),
+        ('Discontinued', 'Discontinued'),
+        ('Seasonal', 'Seasonal'),
+        ('Damaged', 'Damaged (slow-moving)')
+    ]
+    product_status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Active', null=True, blank=True)
+    damage_discount_price = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True, help_text="Special discounted price if damaged")
+    damage_remark = models.TextField(blank=True, null=True, help_text="Reason for discount")
+
+    # --- 8. Media (Up to 5 Images) ---
+    image_1 = models.ImageField(upload_to='product_pics/', blank=True, null=True)
+    image_2 = models.ImageField(upload_to='product_pics/', blank=True, null=True)
+    image_3 = models.ImageField(upload_to='product_pics/', blank=True, null=True)
+    image_4 = models.ImageField(upload_to='product_pics/', blank=True, null=True)
+    image_5 = models.ImageField(upload_to='product_pics/', blank=True, null=True)
+
+    def save(self, *args, **kwargs):
+        # 1. Auto-generate Product ID
+        if not self.product_id:
+            self.product_id = f"PRD-{uuid.uuid4().hex[:6].upper()}"
+
+        # 2. Auto-calculate BDT Selling Price for Imports (as per your logic: INR * BDT Rate * Markup)
+        # Assuming an example static conversion rate here (e.g., 1 INR = 1.35 BDT). 
+        # In a full ERP, this rate would be fetched from a master settings table.
+        if self.source == 'Import' and self.mrp_inr and self.mrp_inr > 0:
+            conversion_rate = 1.35 
+            base_cost = float(self.mrp_inr) * conversion_rate
+            markup_multiplier = 1 + (float(self.markup_percentage) / 100) if self.markup_percentage else 1
+            
+            # This is a basic auto-fill, it will not overwrite if you manually typed a specific BDT retail price
+            if not self.retail_price_bdt or self.retail_price_bdt == 0:
+                self.retail_price_bdt = base_cost * markup_multiplier
+
+        super(Product, self).save(*args, **kwargs)
+
+    def __str__(self):
+        return f"{self.part_number} - {self.product_name}"
+
+serializers :
+from rest_framework import serializers
+from .models import Product
+
+class ProductSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Product
+        fields = '__all__'
+
+views :
+import pandas as pd
+from rest_framework import viewsets, status
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.parsers import MultiPartParser, FormParser
+
+from .models import Product
+from .serializers import ProductSerializer
+from brand.models import Brand  # <-- Added the Brand model import
+
+# --- 1. Standard CRUD ViewSet ---
+class ProductViewSet(viewsets.ModelViewSet):
+    queryset = Product.objects.all()
+    serializer_class = ProductSerializer
+
+# --- 2. New Bulk Excel Import View ---
+class BulkProductImportView(APIView):
+    parser_classes = (MultiPartParser, FormParser)
+
+    def post(self, request, *args, **kwargs):
+        file = request.FILES.get('excel_file') or request.FILES.get('file') 
+        
+        if not file:
+            return Response({"error": "No file uploaded"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            df = pd.read_excel(file)
+            
+            # Convert all NaN values to None safely
+            df = df.replace({getattr(pd, 'NA', None): None})
+            df = df.where(pd.notnull(df), None)
+
+            created_count = 0
+            for index, row in df.iterrows():
+                part_number = row.get('part_number')
+                if not part_number:
+                    continue  # Skip rows without primary identity validation
+
+                # Safely pull barcode check
+                barcode = row.get('barcode')
+                
+                # Check for duplicates before executing transaction
+                if Product.objects.filter(part_number=part_number).exists() or \
+                   (barcode and Product.objects.filter(barcode=barcode).exists()):
+                    continue
+                
+                # --- AUTOMATIC BRAND CREATION LOGIC ---
+                brand_raw = row.get('brand')
+                brand_obj = None
+                
+                if brand_raw and str(brand_raw).strip().lower() not in ['nan', 'none', '']:
+                    brand_obj, created = Brand.objects.get_or_create(name=str(brand_raw).strip())
+
+                # --- SECURE DATA TYPE DICTIONARY ---
+                def safe_int(val, default=0):
+                    if val is None or str(val).strip().lower() in ['nan', 'none', '']:
+                        return default
+                    try:
+                        return int(float(val))
+                    except (ValueError, TypeError):
+                        return default
+
+                def safe_decimal(val, default=0.00):
+                    if val is None or str(val).strip().lower() in ['nan', 'none', '']:
+                        return default
+                    try:
+                        return float(val)
+                    except (ValueError, TypeError):
+                        return default
+
+                # Map fields defensively using key fallbacks
+                product = Product(
+                    part_number=str(part_number).strip(),
+                    product_name=row.get('product_name', f"Product {part_number}"),
+                    brand=brand_obj,
+                    category=row.get('category', ''),
+                    source=row.get('source', 'Local'),
+                    hs_code=row.get('hs_code', ''),
+                    mrp_inr=safe_decimal(row.get('mrp_inr'), 0.00),
+                    purchase_cost_bdt=safe_decimal(row.get('purchase_cost_bdt'), 0.00),
+                    markup_percentage=safe_decimal(row.get('markup_percentage'), 0.00),
+                    wholesale_price_bdt=safe_decimal(row.get('wholesale_price_bdt'), 0.00),
+                    retail_price_bdt=safe_decimal(row.get('retail_price_bdt'), 0.00),
+                    unit=row.get('unit', 'piece'),
+                    alternative_units=row.get('alternative_units', ''),
+                    barcode=barcode if barcode else None,
+                    warranty_period=safe_int(row.get('warranty_period'), 0),
+                    vat_code=row.get('vat_code', ''),
+                    vehicle_compatibility=row.get('vehicle_compatibility', ''),
+                    min_stock_level=safe_int(row.get('min_stock_level'), 5),
+                    max_stock_level=safe_int(row.get('max_stock_level'), None) if row.get('max_stock_level') is not None else None,
+                    reorder_point=safe_int(row.get('reorder_point'), 5),
+                    product_status=row.get('product_status', 'Active'),
+                    weight=safe_decimal(row.get('weight'), None) if row.get('weight') is not None else None,
+                )
+                
+                product.save() 
+                created_count += 1
+            
+            return Response(
+                {"message": f"Successfully imported {created_count} products."}, 
+                status=status.HTTP_201_CREATED
+            )
+        
+        except Exception as e:
+            # This captures structural system issues explicitly
+            return Response(
+                {"error": f"Failed to parse Excel: {str(e)}"}, 
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+
+currently as you can see the system is like if you purchase anything it will update the price of products model. and after at the time of sale products prices is being fetched from products app. But now i want products models and other thing will be remain as it is now. Just create a new field in Stock app : "mrp". when user will purchase anything it will set that stocks per unit price (mrp) by the purchase price of products. Sometimes Same products can be purchase at multiple rates, so it can store like :
+product A
+stock 15 of 500 taka
+stock 10 of 450 taka
+total 25 in stock.
+so the price can be multiple

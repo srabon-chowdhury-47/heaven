@@ -58,14 +58,15 @@ export default function AddSale() {
 
   // --- ITEM STATES ---
   const [manualItems, setManualItems] = useState([
-    { 
-      product: "", 
+    {
+      product: "",
       purchase_price_bdt: "",
+      selected_batch_id: "",
       multiplier: "",
-      unit_price_bdt: "", 
-      quantity: "", 
-      search: "", 
-      showDropdown: false 
+      unit_price_bdt: "",
+      quantity: "",
+      search: "",
+      showDropdown: false,
     },
   ]);
   const [brandItems, setBrandItems] = useState([]);
@@ -146,7 +147,6 @@ export default function AddSale() {
       const response = await axiosInstance.get(`sale/sales/${id}/`);
       const sale = response.data;
 
-      // Set the current user as the sold_by when editing
       const soldBy = currentUser?.id || sale.sold_by || "";
 
       setOrderData({
@@ -156,7 +156,6 @@ export default function AddSale() {
         remarks: sale.remarks || "",
       });
 
-      // Set customer name for display
       if (sale.customer) {
         const cust = customers.find((c) => String(c.id) === String(sale.customer));
         if (cust) {
@@ -169,26 +168,27 @@ export default function AddSale() {
 
       if (sale.items && sale.items.length > 0) {
         const items = sale.items.map((item) => {
-          // Find the product - try multiple ways
           let product = products.find((p) => String(p.id) === String(item.product));
-          
+
           if (!product && item.product_id) {
             product = products.find((p) => String(p.id) === String(item.product_id));
           }
-          
+
           if (!product && item.product_name) {
-            product = products.find((p) => 
+            product = products.find((p) =>
               (p.product_name || p.name || "").toLowerCase() === item.product_name.toLowerCase()
             );
           }
 
-          const partNumber = product?.part_number || "";
           const productName = item.product_name || product?.product_name || product?.name || "";
-          // CHANGED: Only product name in search field
           const searchText = productName;
-          
-          // IMPORTANT: Get purchase price from product
-          const purchasePrice = product?.purchase_cost_bdt || 0;
+
+          // Purchase price now sourced from stock batches (FIFO default), fallback to
+          // product's last-known purchase cost if no batch data exists.
+          const batches = getProductBatches(item.product);
+          const defaultBatch = batches.length > 0 ? batches[0] : null;
+          const batchPrice = defaultBatch ? parseFloat(defaultBatch.mrp) || 0 : 0;
+          const purchasePrice = batchPrice > 0 ? batchPrice : (product?.purchase_cost_bdt || 0);
 
           let multiplier = item.multiplier || "";
           if (!multiplier && purchasePrice > 0 && parseFloat(item.unit_price_bdt) > 0) {
@@ -199,6 +199,7 @@ export default function AddSale() {
           return {
             product: item.product,
             purchase_price_bdt: purchasePrice,
+            selected_batch_id: defaultBatch ? String(defaultBatch.id) : "",
             multiplier: multiplier,
             unit_price_bdt: parseFloat(item.unit_price_bdt).toFixed(2),
             quantity: item.quantity,
@@ -206,17 +207,17 @@ export default function AddSale() {
             showDropdown: false,
           };
         });
-        
+
         setManualItems(items);
-        // Add an empty row at the end
-        setManualItems((prev) => [...prev, { 
-          product: "", 
-          purchase_price_bdt: "", 
-          multiplier: "", 
-          unit_price_bdt: "", 
-          quantity: "", 
-          search: "", 
-          showDropdown: false 
+        setManualItems((prev) => [...prev, {
+          product: "",
+          purchase_price_bdt: "",
+          selected_batch_id: "",
+          multiplier: "",
+          unit_price_bdt: "",
+          quantity: "",
+          search: "",
+          showDropdown: false
         }]);
       }
 
@@ -262,14 +263,15 @@ export default function AddSale() {
     fetchData();
   }, [id]);
 
-  // --- SEPARATE USEFFECT FOR FETCHING SALE DATA (LIKE DRAFT SALE) ---
+  // --- SEPARATE USEFFECT FOR FETCHING SALE DATA ---
   useEffect(() => {
     if (!isEditing) return;
     if (products.length === 0) return;
     if (customers.length === 0) return;
+    if (stocks.length === 0) return;
 
     fetchSaleData();
-  }, [isEditing, products, customers]);
+  }, [isEditing, products, customers, stocks]);
 
   // --- Debounced customer search ---
   useEffect(() => {
@@ -340,6 +342,45 @@ export default function AddSale() {
     return stockItem ? stockItem.current_quantity ?? 0 : 0;
   };
 
+  // Purchase price now comes from Stock Batches (FIFO — the batch that would
+  // actually be consumed first on sale), NOT from Product.purchase_cost_bdt.
+  const getBatchPurchasePrice = (productId) => {
+    const stockItem = stocks.find((s) => String(s.product) === String(productId));
+    if (!stockItem) return 0;
+
+    if (stockItem.fifo_mrp !== undefined && stockItem.fifo_mrp !== null) {
+      const val = parseFloat(stockItem.fifo_mrp);
+      if (!isNaN(val)) return val;
+    }
+
+    const activeBatches = (stockItem.batches || []).filter((b) => b.quantity > 0);
+    if (activeBatches.length === 0) return 0;
+
+    const sorted = [...activeBatches].sort(
+      (a, b) => new Date(a.created_at) - new Date(b.created_at)
+    );
+    return parseFloat(sorted[0].mrp) || 0;
+  };
+
+  // Returns all active (qty > 0) batches for a product, oldest first (FIFO order)
+  const getProductBatches = (productId) => {
+    const stockItem = stocks.find((s) => String(s.product) === String(productId));
+    if (!stockItem) return [];
+    return (stockItem.batches || [])
+      .filter((b) => b.quantity > 0)
+      .sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+  };
+
+  // Get a specific batch's price by batch id (falls back to oldest/FIFO if not found)
+  const getBatchPriceById = (productId, batchId) => {
+    const batches = getProductBatches(productId);
+    if (!batchId) {
+      return batches.length > 0 ? parseFloat(batches[0].mrp) || 0 : 0;
+    }
+    const batch = batches.find((b) => String(b.id) === String(batchId));
+    return batch ? parseFloat(batch.mrp) || 0 : (batches.length > 0 ? parseFloat(batches[0].mrp) || 0 : 0);
+  };
+
   const getBrandName = (brandId) => {
     if (!brandId) return "Generic";
     const brand = brands.find((b) => String(b.id) === String(brandId));
@@ -371,14 +412,14 @@ export default function AddSale() {
   // --- MANUAL MODE ---
   const handleManualItemChange = (index, field, value) => {
     const newItems = [...manualItems];
-    
+
     if (field === "search") {
       newItems[index].search = value;
       newItems[index].showDropdown = true;
       setManualItems(newItems);
       return;
     }
-    
+
     if (field === "product") {
       const isDuplicate = manualItems.some(
         (item, i) => i !== index && String(item.product) === String(value)
@@ -390,24 +431,28 @@ export default function AddSale() {
       const selectedProduct = products.find((p) => String(p.id) === String(value));
       if (selectedProduct) {
         newItems[index].product = value;
-        const purchasePrice = selectedProduct.purchase_cost_bdt || 0;
-        newItems[index].purchase_price_bdt = purchasePrice;
+
+        const batches = getProductBatches(value);
+        const defaultBatch = batches.length > 0 ? batches[0] : null; // oldest = FIFO default
+        newItems[index].selected_batch_id = defaultBatch ? String(defaultBatch.id) : "";
+        newItems[index].purchase_price_bdt = defaultBatch ? parseFloat(defaultBatch.mrp) || 0 : 0;
+
         newItems[index].multiplier = "";
         newItems[index].unit_price_bdt = "";
-        // CHANGED: Only the product name in the search field
         const name = selectedProduct.product_name || selectedProduct.name || "";
         newItems[index].search = name;
         newItems[index].showDropdown = false;
       }
       if (index === newItems.length - 1) {
-        newItems.push({ 
-          product: "", 
-          purchase_price_bdt: "", 
-          multiplier: "", 
-          unit_price_bdt: "", 
-          quantity: "", 
-          search: "", 
-          showDropdown: false 
+        newItems.push({
+          product: "",
+          purchase_price_bdt: "",
+          selected_batch_id: "",
+          multiplier: "",
+          unit_price_bdt: "",
+          quantity: "",
+          search: "",
+          showDropdown: false
         });
       }
     } else if (field === "multiplier") {
@@ -427,7 +472,24 @@ export default function AddSale() {
     } else {
       newItems[index][field] = value;
     }
-    
+
+    setManualItems(newItems);
+  };
+
+  // Handle when the user manually picks a different batch (and thus a different price)
+  const handleBatchSelect = (index, batchId) => {
+    const newItems = [...manualItems];
+    const item = newItems[index];
+    const price = getBatchPriceById(item.product, batchId);
+
+    item.selected_batch_id = batchId;
+    item.purchase_price_bdt = price;
+
+    if (item.multiplier) {
+      const salePrice = calculateSalePrice(price, item.multiplier);
+      item.unit_price_bdt = salePrice;
+    }
+
     setManualItems(newItems);
   };
 
@@ -435,14 +497,15 @@ export default function AddSale() {
     if (manualItems.length > 1) {
       setManualItems(manualItems.filter((_, i) => i !== index));
     } else {
-      setManualItems([{ 
-        product: "", 
-        purchase_price_bdt: "", 
-        multiplier: "", 
-        unit_price_bdt: "", 
-        quantity: "", 
-        search: "", 
-        showDropdown: false 
+      setManualItems([{
+        product: "",
+        purchase_price_bdt: "",
+        selected_batch_id: "",
+        multiplier: "",
+        unit_price_bdt: "",
+        quantity: "",
+        search: "",
+        showDropdown: false
       }]);
     }
   };
@@ -505,17 +568,22 @@ export default function AddSale() {
       } else {
         const newBrands = [...prev, brandId];
         const productsToAdd = products.filter((p) => String(p.brand) === String(brandId));
-        const newBatchItems = productsToAdd.map((p) => ({
-          product: p.id,
-          product_name: p.product_name || p.name,
-          part_number: p.part_number || "",
-          brand_name: getBrandName(p.brand),
-          purchase_cost_bdt: p.purchase_cost_bdt || 0,
-          multiplier: "",
-          unit_price_bdt: "",
-          quantity: "",
-          current_stock: getProductStock(p.id),
-        }));
+        const newBatchItems = productsToAdd.map((p) => {
+          const batches = getProductBatches(p.id);
+          const defaultBatch = batches.length > 0 ? batches[0] : null;
+          return {
+            product: p.id,
+            product_name: p.product_name || p.name,
+            part_number: p.part_number || "",
+            brand_name: getBrandName(p.brand),
+            purchase_cost_bdt: defaultBatch ? parseFloat(defaultBatch.mrp) || 0 : 0,
+            selected_batch_id: defaultBatch ? String(defaultBatch.id) : "",
+            multiplier: "",
+            unit_price_bdt: "",
+            quantity: "",
+            current_stock: getProductStock(p.id),
+          };
+        });
         setBrandItems((currentItems) => {
           const existingProductIds = currentItems.map((item) => String(item.product));
           const uniqueNewItems = newBatchItems.filter(
@@ -530,7 +598,7 @@ export default function AddSale() {
 
   const handleBrandItemChange = (index, field, value) => {
     const newItems = [...brandItems];
-    
+
     if (field === "multiplier") {
       newItems[index].multiplier = value;
       const salePrice = calculateSalePrice(newItems[index].purchase_cost_bdt, value);
@@ -548,7 +616,24 @@ export default function AddSale() {
     } else {
       newItems[index][field] = value;
     }
-    
+
+    setBrandItems(newItems);
+  };
+
+  // Handle batch selection in brand-batch mode
+  const handleBrandBatchSelect = (index, batchId) => {
+    const newItems = [...brandItems];
+    const item = newItems[index];
+    const price = getBatchPriceById(item.product, batchId);
+
+    item.selected_batch_id = batchId;
+    item.purchase_cost_bdt = price;
+
+    if (item.multiplier) {
+      const salePrice = calculateSalePrice(price, item.multiplier);
+      item.unit_price_bdt = salePrice;
+    }
+
     setBrandItems(newItems);
   };
 
@@ -630,12 +715,15 @@ export default function AddSale() {
 
     const items = draft.items.map((item) => {
       const product = products.find((p) => String(p.id) === String(item.product));
-      const partNumber = product?.part_number || "";
       const productName = item.product_name || product?.product_name || product?.name || "";
-      // CHANGED: Only product name in search field
       const searchText = productName;
-      const purchasePrice = product?.purchase_cost_bdt || 0;
-      
+
+      // Purchase price sourced from stock batches (FIFO default)
+      const batches = getProductBatches(item.product);
+      const defaultBatch = batches.length > 0 ? batches[0] : null;
+      const batchPrice = defaultBatch ? parseFloat(defaultBatch.mrp) || 0 : 0;
+      const purchasePrice = batchPrice > 0 ? batchPrice : (product?.purchase_cost_bdt || 0);
+
       let multiplier = item.multiplier || "";
       if (!multiplier && purchasePrice > 0 && parseFloat(item.unit_price_bdt) > 0) {
         const salePrice = parseFloat(item.unit_price_bdt);
@@ -645,6 +733,7 @@ export default function AddSale() {
       return {
         product: item.product,
         purchase_price_bdt: purchasePrice,
+        selected_batch_id: defaultBatch ? String(defaultBatch.id) : "",
         multiplier: multiplier,
         unit_price_bdt: parseFloat(item.unit_price_bdt).toFixed(2),
         quantity: item.quantity,
@@ -652,14 +741,15 @@ export default function AddSale() {
         showDropdown: false,
       };
     });
-    items.push({ 
-      product: "", 
-      purchase_price_bdt: "", 
-      multiplier: "", 
-      unit_price_bdt: "", 
-      quantity: "", 
-      search: "", 
-      showDropdown: false 
+    items.push({
+      product: "",
+      purchase_price_bdt: "",
+      selected_batch_id: "",
+      multiplier: "",
+      unit_price_bdt: "",
+      quantity: "",
+      search: "",
+      showDropdown: false
     });
     setManualItems(items);
     setShowDraftModal(false);
@@ -679,7 +769,6 @@ export default function AddSale() {
     setLoading(true);
     setError("");
 
-    // Ensure sold_by is set to current user
     const soldBy = currentUser?.id || orderData.sold_by;
     if (!soldBy) {
       setError("Please select the Employee making this sale.");
@@ -714,6 +803,10 @@ export default function AddSale() {
         quantity: parseInt(item.quantity, 10),
         unit_price_bdt: parseFloat(item.unit_price_bdt).toFixed(2),
         multiplier: item.multiplier ? parseFloat(item.multiplier).toFixed(2) : null,
+        // NOTE: selected_batch_id is tracked client-side for price lookup/display.
+        // Backend currently always consumes stock FIFO regardless of this value.
+        // Uncomment below once backend supports explicit batch consumption:
+        // batch_id: item.selected_batch_id || null,
       })),
     };
 
@@ -1009,7 +1102,7 @@ export default function AddSale() {
                   Stock
                 </th>
                 <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
-                  Purch. Cost
+                  Purch. Cost / Batch
                 </th>
                 <th className="border border-gray-600 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-wider text-center">
                   Multiplier (×)
@@ -1030,88 +1123,112 @@ export default function AddSale() {
             </thead>
             <tbody>
               {!isEditing && entryMode === "brand" &&
-                brandItems.map((item, index) => (
-                  <tr key={item.product} className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}>
-                    <td className="border border-gray-300 px-2 py-1.5 text-center text-xs text-gray-500">{index + 1}</td>
-                    <td className="border border-gray-300 px-2 py-1.5">
-                      <div className="font-medium text-gray-800 text-xs">
-                        {item.part_number && <span className="text-blue-600 mr-1">{item.part_number}</span>}
-                        {item.product_name}
-                      </div>
-                      <div className="text-[9px] text-gray-500 uppercase">{item.brand_name}</div>
-                    </td>
-                    <td className="border border-gray-300 px-2 py-1.5 text-center">
-                      <span
-                        className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                          item.current_stock <= 5
-                            ? "bg-red-100 text-red-600"
-                            : "bg-gray-100 text-gray-700"
-                        }`}
-                      >
-                        {item.current_stock}
-                      </span>
-                    </td>
-                    <td className="border border-gray-300 px-2 py-1.5 text-center font-mono text-gray-500 text-xs">
-                      {parseFloat(item.purchase_cost_bdt).toFixed(2)}
-                    </td>
-                    <td className="border border-gray-300 px-2 py-1.5">
-                      <div className="flex items-center gap-0.5">
+                brandItems.map((item, index) => {
+                  const batches = getProductBatches(item.product);
+                  return (
+                    <tr key={item.product} className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}>
+                      <td className="border border-gray-300 px-2 py-1.5 text-center text-xs text-gray-500">{index + 1}</td>
+                      <td className="border border-gray-300 px-2 py-1.5">
+                        <div className="font-medium text-gray-800 text-xs">
+                          {item.part_number && <span className="text-blue-600 mr-1">{item.part_number}</span>}
+                          {item.product_name}
+                        </div>
+                        <div className="text-[9px] text-gray-500 uppercase flex items-center gap-1">
+                          {item.brand_name}
+                          {batches.length > 1 && (
+                            <span className="inline-flex items-center gap-0.5 bg-amber-50 text-amber-700 border border-amber-200 px-1 py-0.5 rounded normal-case">
+                              <FiLayers size={9} /> {batches.length} lots
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="border border-gray-300 px-2 py-1.5 text-center">
+                        <span
+                          className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                            item.current_stock <= 5
+                              ? "bg-red-100 text-red-600"
+                              : "bg-gray-100 text-gray-700"
+                          }`}
+                        >
+                          {item.current_stock}
+                        </span>
+                      </td>
+                      <td className="border border-gray-300 px-2 py-1.5 text-center">
+                        {batches.length > 0 ? (
+                          <select
+                            value={item.selected_batch_id || ""}
+                            onChange={(e) => handleBrandBatchSelect(index, e.target.value)}
+                            className="w-full bg-white border border-gray-300 rounded p-0.5 text-[11px] text-center focus:ring-1 focus:ring-green-500 outline-none font-mono"
+                          >
+                            {batches.map((b, i) => (
+                              <option key={b.id} value={b.id}>
+                                ৳{parseFloat(b.mrp).toFixed(2)} ({b.quantity} left{i === 0 ? ", oldest" : ""})
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="text-[10px] text-red-500">No batch</span>
+                        )}
+                      </td>
+                      <td className="border border-gray-300 px-2 py-1.5">
+                        <div className="flex items-center gap-0.5">
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            placeholder="×"
+                            value={item.multiplier}
+                            onChange={(e) =>
+                              handleBrandItemChange(index, "multiplier", e.target.value)
+                            }
+                            className="w-full bg-white border border-gray-300 rounded p-0.5 text-xs text-center focus:ring-1 focus:ring-green-500 outline-none"
+                          />
+                          <FiTrendingUp className="text-gray-400" size={12} />
+                        </div>
+                      </td>
+                      <td className="border border-gray-300 px-2 py-1.5">
                         <input
                           type="number"
                           step="0.01"
                           min="0"
-                          placeholder="×"
-                          value={item.multiplier}
+                          placeholder="0.00"
+                          value={item.unit_price_bdt}
                           onChange={(e) =>
-                            handleBrandItemChange(index, "multiplier", e.target.value)
+                            handleBrandItemChange(index, "unit_price_bdt", e.target.value)
+                          }
+                          className="w-full bg-white border border-gray-300 rounded p-0.5 text-xs text-center focus:ring-1 focus:ring-green-500 outline-none font-semibold text-green-700"
+                        />
+                      </td>
+                      <td className="border border-gray-300 px-2 py-1.5">
+                        <input
+                          type="number"
+                          min="0"
+                          placeholder="0"
+                          value={item.quantity}
+                          onChange={(e) =>
+                            handleBrandItemChange(index, "quantity", e.target.value)
                           }
                           className="w-full bg-white border border-gray-300 rounded p-0.5 text-xs text-center focus:ring-1 focus:ring-green-500 outline-none"
                         />
-                        <FiTrendingUp className="text-gray-400" size={12} />
-                      </div>
-                    </td>
-                    <td className="border border-gray-300 px-2 py-1.5">
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        placeholder="0.00"
-                        value={item.unit_price_bdt}
-                        onChange={(e) =>
-                          handleBrandItemChange(index, "unit_price_bdt", e.target.value)
-                        }
-                        className="w-full bg-white border border-gray-300 rounded p-0.5 text-xs text-center focus:ring-1 focus:ring-green-500 outline-none font-semibold text-green-700"
-                      />
-                    </td>
-                    <td className="border border-gray-300 px-2 py-1.5">
-                      <input
-                        type="number"
-                        min="0"
-                        placeholder="0"
-                        value={item.quantity}
-                        onChange={(e) =>
-                          handleBrandItemChange(index, "quantity", e.target.value)
-                        }
-                        className="w-full bg-white border border-gray-300 rounded p-0.5 text-xs text-center focus:ring-1 focus:ring-green-500 outline-none"
-                      />
-                    </td>
-                    <td className="border border-gray-300 px-2 py-1.5 text-right font-mono font-bold text-gray-700 text-xs">
-                      {(
-                        (parseFloat(item.quantity) || 0) *
-                        (parseFloat(item.unit_price_bdt) || 0)
-                      ).toFixed(2)}
-                    </td>
-                    <td className="border border-gray-300 px-2 py-1.5 text-center">
-                      <button
-                        type="button"
-                        onClick={() => removeBrandRow(index)}
-                        className="text-gray-400 hover:text-red-600 transition p-0.5"
-                      >
-                        <FiTrash2 size={15} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="border border-gray-300 px-2 py-1.5 text-right font-mono font-bold text-gray-700 text-xs">
+                        {(
+                          (parseFloat(item.quantity) || 0) *
+                          (parseFloat(item.unit_price_bdt) || 0)
+                        ).toFixed(2)}
+                      </td>
+                      <td className="border border-gray-300 px-2 py-1.5 text-center">
+                        <button
+                          type="button"
+                          onClick={() => removeBrandRow(index)}
+                          className="text-gray-400 hover:text-red-600 transition p-0.5"
+                        >
+                          <FiTrash2 size={15} />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
 
               {entryMode === "manual" &&
                 manualItems.map((item, index) => {
@@ -1120,10 +1237,8 @@ export default function AddSale() {
                   );
                   const manualBrandName = selectedProd ? getBrandName(selectedProd.brand) : "";
                   const currentStock = selectedProd ? getProductStock(selectedProd.id) : "-";
-                  const purchaseCost = selectedProd
-                    ? parseFloat(selectedProd.purchase_cost_bdt).toFixed(2)
-                    : "-";
                   const partNumber = selectedProd?.part_number || "";
+                  const itemBatches = getProductBatches(item.product);
 
                   const filteredProducts = getFilteredProducts(item.search || "");
 
@@ -1157,6 +1272,7 @@ export default function AddSale() {
                                   newItems[index].product = "";
                                   newItems[index].search = "";
                                   newItems[index].purchase_price_bdt = "";
+                                  newItems[index].selected_batch_id = "";
                                   newItems[index].multiplier = "";
                                   newItems[index].unit_price_bdt = "";
                                   newItems[index].showDropdown = false;
@@ -1189,7 +1305,7 @@ export default function AddSale() {
                                         </span>
                                       </span>
                                       <span className="text-[10px] text-gray-400">
-                                        Stock: {getProductStock(p.id)}
+                                        Stock: {getProductStock(p.id)} • ৳{getBatchPurchasePrice(p.id).toFixed(2)}
                                       </span>
                                     </li>
                                   ))}
@@ -1206,6 +1322,13 @@ export default function AddSale() {
                           <div className="mt-0.5 flex flex-wrap items-center gap-1 text-[9px] text-gray-600">
                             {partNumber && <span className="font-mono text-blue-600">{partNumber}</span>}
                             <span className="uppercase">{manualBrandName}</span>
+                            {itemBatches.length > 1 ? (
+                              <span className="inline-flex items-center gap-0.5 bg-amber-50 text-amber-700 border border-amber-200 px-1 py-0.5 rounded">
+                                <FiLayers size={9} /> {itemBatches.length} price lots — pick one →
+                              </span>
+                            ) : itemBatches.length === 0 ? (
+                              <span className="text-red-500">No stock batch found</span>
+                            ) : null}
                           </div>
                         )}
                       </td>
@@ -1220,18 +1343,32 @@ export default function AddSale() {
                           {currentStock}
                         </span>
                       </td>
-                      <td className="border border-gray-300 px-2 py-3 text-center font-mono text-gray-500 text-xs">
-                        <input
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          placeholder="0.00"
-                          value={item.purchase_price_bdt}
-                          onChange={(e) =>
-                            handleManualItemChange(index, "purchase_price_bdt", e.target.value)
-                          }
-                          className="w-full bg-white border border-gray-300 rounded p-1 text-xs text-center focus:ring-1 focus:ring-green-500 outline-none"
-                        />
+                      <td className="border border-gray-300 px-2 py-3 text-center">
+                        {item.product && itemBatches.length > 0 ? (
+                          <select
+                            value={item.selected_batch_id || ""}
+                            onChange={(e) => handleBatchSelect(index, e.target.value)}
+                            className="w-full bg-white border border-gray-300 rounded p-1 text-xs text-center focus:ring-1 focus:ring-green-500 outline-none font-mono"
+                          >
+                            {itemBatches.map((b, i) => (
+                              <option key={b.id} value={b.id}>
+                                ৳{parseFloat(b.mrp).toFixed(2)} ({b.quantity} left{i === 0 ? ", oldest" : ""})
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            placeholder="0.00"
+                            value={item.purchase_price_bdt}
+                            onChange={(e) =>
+                              handleManualItemChange(index, "purchase_price_bdt", e.target.value)
+                            }
+                            className="w-full bg-white border border-gray-300 rounded p-1 text-xs text-center focus:ring-1 focus:ring-green-500 outline-none"
+                          />
+                        )}
                       </td>
                       <td className="border border-gray-300 px-2 py-3">
                         <div className="flex items-center gap-0.5">
@@ -1313,14 +1450,15 @@ export default function AddSale() {
             <button
               type="button"
               onClick={() =>
-                setManualItems([...manualItems, { 
-                  product: "", 
-                  purchase_price_bdt: "", 
-                  multiplier: "", 
-                  unit_price_bdt: "", 
-                  quantity: "", 
-                  search: "", 
-                  showDropdown: false 
+                setManualItems([...manualItems, {
+                  product: "",
+                  purchase_price_bdt: "",
+                  selected_batch_id: "",
+                  multiplier: "",
+                  unit_price_bdt: "",
+                  quantity: "",
+                  search: "",
+                  showDropdown: false
                 }])
               }
               className="flex items-center gap-1 text-xs text-green-600 hover:text-green-800 font-semibold"
